@@ -1,6 +1,6 @@
-on: [push, pull_request]
+name: Integration Tests
 
-name: Static Checks
+on: [push, pull_request]
 
 jobs:
   tests:
@@ -9,23 +9,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         rust: [stable]
         make:
-          - name: Clippy
-            task: "cargo clippy"
-          - name: Unit tests # Run unit tests
-            task: "make unit-test"
+          - name: Run integration tests # Integration tests
+            task: "npx ts-node metadata-provider/tests/integration.ts"
         include:
           - os: ubuntu-latest
             sccache-path: /home/runner/.cache/sccache
-          - os: macos-latest
-            sccache-path: /Users/runner/Library/Caches/Mozilla.sccache
-        exclude:
-          - os: macos-latest
-            rust: stable
-            make:
-              name: Clippy
+
     env:
       RUST_BACKTRACE: full
       RUSTC_WRAPPER: sccache
@@ -33,10 +25,21 @@ jobs:
       SCCACHE_CACHE_SIZE: 2G
       SCCACHE_DIR: ${{ matrix.sccache-path }}
       # SCCACHE_RECACHE: 1 # Uncomment this to clear cache, then comment it back out
+
+    # Service containers to run with `container-job`
+    services:
+      # Label used to access the service container
+      secret:
+        # Docker Hub image
+        image: enigmampc/secret-network-sw-dev:v1.2.2-1
+        ports:
+          # Opens tcp port
+          - 5000:5000
+          - 9091:9091
+
     steps:
       - uses: actions/checkout@v2
-      - name: Install sccache (ubuntu-latest)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Install sccache
         env:
           LINK: https://github.com/mozilla/sccache/releases/download
           SCCACHE_VERSION: v0.2.15
@@ -47,21 +50,15 @@ jobs:
           mv -f $SCCACHE_FILE/sccache $HOME/.local/bin/sccache
           chmod +x $HOME/.local/bin/sccache
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-      - name: Install sccache (macos-latest)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew update
-          brew install sccache
+      - name: Install dependencies
+        run: npm --prefix tests/ install # Install dependencies
       - uses: ./.github/actions/install-rust
         with:
           toolchain: ${{ matrix.rust }}
       - name: Add wasm toolchain
         run: |
           rustup target add wasm32-unknown-unknown
-      - name: Install Clippy
-        if: matrix.make.name == 'Clippy'
-        run: |
-          rustup component add clippy
+
       - name: Cache cargo registry
         uses: actions/cache@v2
         continue-on-error: false
@@ -82,6 +79,8 @@ jobs:
             ${{ runner.os }}-sccache-
       - name: Start sccache server
         run: sccache --start-server
+      - name: Compile code
+        run: make build
       - name: ${{ matrix.make.name }}
         run: ${{ matrix.make.task }}
       - name: Print sccache stats
