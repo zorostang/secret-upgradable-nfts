@@ -20,6 +20,9 @@ contract.wasm*
 *.iml
 .idea
 
+# node.js
+*/node_modules
+
 # dotfiles
 .editorconfig
 .env

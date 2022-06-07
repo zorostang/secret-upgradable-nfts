@@ -38,10 +38,13 @@ build-mainnet-reproducible:
 
 .PHONY: compress-wasm
 compress-wasm:
-	cp ./target/wasm32-unknown-unknown/release/*.wasm ./contract.wasm
+	cp ./target/wasm32-unknown-unknown/release/metadata_provider.wasm ./wasm
+	cp ./target/wasm32-unknown-unknown/release/snip721_upgradable.wasm ./wasm
 	@## The following line is not necessary, may work only on linux (extra size optimization)
-	@# wasm-opt -Os ./contract.wasm -o ./contract.wasm
-	cat ./contract.wasm | gzip -9 > ./contract.wasm.gz
+	wasm-opt -Os ./wasm/metadata_provider.wasm -o ./wasm/metadata_provider.wasm
+	wasm-opt -Os ./wasm/snip721_upgradable.wasm -o ./wasm/snip721_upgradable.wasm
+	cat ./wasm/metadata_provider.wasm | gzip -9 > ./wasm/metadata_provider.wasm.gz
+	cat ./wasm/metadata_provider.wasm | gzip -9 > ./wasm/snip721_upgradable.wasm.gz
 
 .PHONY: schema
 schema:
