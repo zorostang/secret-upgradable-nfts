@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "metadata-provider",
+    "snip721-upgradable",
+]
