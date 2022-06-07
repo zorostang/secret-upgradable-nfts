@@ -1,20 +1,20 @@
 use cosmwasm_std::{
-    debug_print, to_binary, Api, Binary, Env, Extern, HandleResponse, HandleResult, 
-    InitResponse, InitResult, Querier, QueryResult, StdError, StdResult, Storage, HumanAddr,
+    debug_print, to_binary, Api, Binary, Env, Extern, HandleResponse, HandleResult, HumanAddr,
+    InitResponse, InitResult, Querier, QueryResult, StdError, StdResult, Storage,
 };
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 
-use crate::msg::{HandleMsg, InitMsg, QueryMsg, HandleAnswer, QueryAnswer, ResponseStatus::Success};
+use crate::msg::{
+    HandleAnswer, HandleMsg, InitMsg, QueryAnswer, QueryMsg, ResponseStatus::Success,
+};
 use crate::state::{
-    json_may_load, json_save, load, may_load, remove, save,
-    Config,
-    BLOCK_KEY, CONFIG_KEY, CREATOR_KEY, MY_ADDRESS_KEY, PRNG_SEED_KEY, PREFIX_VIEW_KEY,
-    PREFIX_PUB_META, PREFIX_PRIV_META
+    json_may_load, json_save, load, may_load, remove, save, Config, BLOCK_KEY, CONFIG_KEY,
+    CREATOR_KEY, MY_ADDRESS_KEY, PREFIX_PRIV_META, PREFIX_PUB_META, PREFIX_VIEW_KEY, PRNG_SEED_KEY,
 };
 
-use secret_toolkit::snip721::{Metadata, Extension, Trait, MediaFile, Authentication};
+use secret_toolkit::snip721::{Authentication, Extension, MediaFile, Metadata, Trait};
 use secret_toolkit::utils::{pad_handle_result, pad_query_result};
-use secret_toolkit::viewing_key::{ViewingKey, VIEWING_KEY_SIZE, ViewingKeyStore};
+use secret_toolkit::viewing_key::{ViewingKey, ViewingKeyStore, VIEWING_KEY_SIZE};
 
 /// pad handle responses and log attributes to blocks of 256 bytes to prevent leaking info based on
 /// response size
@@ -47,12 +47,12 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> HandleResult {
     save(&mut deps.storage, BLOCK_KEY, &env.block)?;
     let mut config: Config = load(&deps.storage, CONFIG_KEY)?;
-    
+
     let response = match msg {
-        HandleMsg::SetMetadata { 
-            token_id, 
-            public_metadata, 
-            private_metadata, 
+        HandleMsg::SetMetadata {
+            token_id,
+            public_metadata,
+            private_metadata,
             ..
         } => handle_set_metadata(
             deps,
@@ -62,24 +62,13 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             public_metadata,
             private_metadata,
         ),
-        HandleMsg::CreateViewingKey { entropy, .. } => handle_create_key(
-            deps,
-            env,
-            &config,
-            &entropy,
-        ),
-        HandleMsg::SetViewingKey { key, .. } => handle_set_key(
-            deps,
-            env,
-            &config,
-            key,
-        ),
-        HandleMsg::ChangeAdmin { address, .. } => handle_change_admin(
-            deps,
-            env,
-            &mut config,
-            &address,
-        ),
+        HandleMsg::CreateViewingKey { entropy, .. } => {
+            handle_create_key(deps, env, &config, &entropy)
+        }
+        HandleMsg::SetViewingKey { key, .. } => handle_set_key(deps, env, &config, key),
+        HandleMsg::ChangeAdmin { address, .. } => {
+            handle_change_admin(deps, env, &mut config, &address)
+        }
     };
     pad_handle_result(response, BLOCK_SIZE)
 }
@@ -92,13 +81,10 @@ pub fn handle_set_metadata<S: Storage, A: Api, Q: Querier>(
     public_metadata: Option<Metadata>,
     private_metadata: Option<Metadata>,
 ) -> HandleResult {
-
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
-        data: Some(to_binary(&HandleAnswer::SetMetadata {
-            status: Success,
-        })?),
+        data: Some(to_binary(&HandleAnswer::SetMetadata { status: Success })?),
     })
 }
 
@@ -108,14 +94,17 @@ pub fn handle_create_key<S: Storage, A: Api, Q: Querier>(
     config: &Config,
     entropy: &str,
 ) -> HandleResult {
-    let key = ViewingKey::create(&mut deps.storage, &env, &env.message.sender, entropy.as_ref());
+    let key = ViewingKey::create(
+        &mut deps.storage,
+        &env,
+        &env.message.sender,
+        entropy.as_ref(),
+    );
 
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
-        data: Some(to_binary(&HandleAnswer::ViewingKey {
-            key,
-        })?),
+        data: Some(to_binary(&HandleAnswer::ViewingKey { key })?),
     })
 }
 
@@ -130,9 +119,7 @@ pub fn handle_set_key<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
-        data: Some(to_binary(&HandleAnswer::ViewingKey {
-            key,
-        })?),
+        data: Some(to_binary(&HandleAnswer::ViewingKey { key })?),
     })
 }
 
@@ -157,23 +144,14 @@ pub fn handle_change_admin<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
-        data: Some(to_binary(&HandleAnswer::ChangeAdmin {
-            status: Success,
-        })?),
+        data: Some(to_binary(&HandleAnswer::ChangeAdmin { status: Success })?),
     })
 }
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> QueryResult {
+pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
     let response = match msg {
-        QueryMsg::NftInfo { token_id } => {
-            query_nft_info(deps, &token_id)
-        }
-        QueryMsg::PrivateMetadata { token_id, viewer } => {
-            query_private_metadata(deps, &token_id)
-        }
+        QueryMsg::NftInfo { token_id } => query_nft_info(deps, &token_id),
+        QueryMsg::PrivateMetadata { token_id, viewer } => query_private_metadata(deps, &token_id),
     };
     pad_query_result(response, BLOCK_SIZE)
 }
@@ -182,7 +160,6 @@ fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     token_id: &str,
 ) -> QueryResult {
-    
     let meta_store = ReadonlyPrefixedStorage::new(PREFIX_PUB_META, &deps.storage);
     let meta: Metadata = may_load(&meta_store, token_id.as_ref())?.unwrap_or_default();
 

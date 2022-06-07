@@ -30,7 +30,6 @@ pub static PREFIX_VIEW_KEY: &[u8] = b"viewkeys";
 /// prefix for the storage of the code hashes of contracts querying this one for metadata
 pub static PREFIX_RECEIVERS: &[u8] = b"receivers";
 
-
 /// Metadata contract config
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {

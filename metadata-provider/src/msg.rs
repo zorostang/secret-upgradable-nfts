@@ -1,8 +1,8 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use cosmwasm_std::HumanAddr;
-use secret_toolkit::snip721::{Extension, Metadata, ViewerInfo};
+use schemars::JsonSchema;
 use secret_toolkit::permit::Permit;
+use secret_toolkit::snip721::{Extension, Metadata, ViewerInfo};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {

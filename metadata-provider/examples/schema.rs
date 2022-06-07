@@ -3,7 +3,7 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use metadata_provider::msg::{HandleMsg, InitMsg, QueryMsg, HandleAnswer, QueryAnswer};
+use metadata_provider::msg::{HandleAnswer, HandleMsg, InitMsg, QueryAnswer, QueryMsg};
 use metadata_provider::state::Config;
 
 fn main() {
@@ -18,5 +18,4 @@ fn main() {
     export_schema(&schema_for!(Config), &out_dir);
     export_schema(&schema_for!(HandleAnswer), &out_dir);
     export_schema(&schema_for!(QueryAnswer), &out_dir);
-
 }
