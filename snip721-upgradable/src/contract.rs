@@ -11,7 +11,6 @@ use std::collections::HashSet;
 
 use secret_toolkit::{
     permit::{validate, Permit, RevokedPermits},
-    snip721::nft_info_query,
     utils::{pad_handle_result, pad_query_result, types::Contract, Query},
 };
 
@@ -479,7 +478,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 /// * `code_hash` - code hash for the new metadata provider
 pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
+    _env: Env,
     address: HumanAddr,
     code_hash: String,
 ) -> HandleResult {
@@ -516,7 +515,7 @@ pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
 /// * `new_code_hash` - code hash for the new metadata provider
 pub fn update_metadata_provider<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
+    _env: Env,
     previous_contract: HumanAddr,
     new_contract: HumanAddr,
     previous_code_hash: String,
@@ -526,14 +525,16 @@ pub fn update_metadata_provider<S: Storage, A: Api, Q: Querier>(
         address: previous_contract,
         hash: previous_code_hash,
     };
-    let new_provider = Contract {
-        address: new_contract.clone(),
-        hash: new_code_hash,
-    };
 
-    // need to look up index of previous provider and replace the provider at that index
+    if load::<Contract, _>(&deps.storage, PROVIDER_KEY).unwrap() == previous_provider {
+        let new_provider = Contract {
+            address: new_contract.clone(),
+            hash: new_code_hash,
+        };
+        save(&mut deps.storage, PROVIDER_KEY, &new_provider)?;
+    }
 
-    save(&mut deps.storage, PROVIDER_KEY, &new_provider)?;
+    // TODO look up index of previous provider and replace the provider at that index
 
     Ok(HandleResponse {
         messages: vec![],
@@ -2250,7 +2251,7 @@ pub fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     let map2idx = ReadonlyPrefixedStorage::new(PREFIX_MAP_TO_INDEX, &deps.storage);
     let may_idx: Option<u32> = may_load(&map2idx, token_id.as_bytes())?;
     // if token id was found
-    if let Some(idx) = may_idx {
+    if let Some(_idx) = may_idx {
         // load metadata provider contract info
         let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
         // query the provider contract

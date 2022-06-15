@@ -22,7 +22,8 @@ const initializeClient = async (endpoint: string, chainId: string) => {
 // Stores and instantiaties a new contract in our network
 const initializeContract = async (
   client: SecretNetworkClient,
-  contractPath: string
+  contractPath: string,
+  initMsg: object,
 ) => {
   const wasmCode = fs.readFileSync(contractPath);
   console.log("Uploading contract");
@@ -62,7 +63,7 @@ const initializeContract = async (
     {
       sender: client.address,
       codeId,
-      initMsg: { count: 4 }, // Initialize our counter to start from 4. This message will trigger our Init function
+      initMsg: initMsg,
       codeHash: contractCodeHash,
       label: "My contract" + Math.ceil(Math.random() * 10000), // The label should be unique for every contract, add random string in order to maintain uniqueness
     },
@@ -124,17 +125,113 @@ async function initializeAndUploadContract() {
 
   await fillUpFromFaucet(client, 100_000_000);
 
-  const [contractHash, contractAddress] = await initializeContract(
+  let initMsg1 = {
+    name: "test_NFT",
+    symbol: "token_symbol",
+    entropy: "secret",
+    config: {
+      public_token_supply: false,
+      public_owner: false,
+      enable_sealed_metadata: false,
+      unwrapped_metadata_is_private: true,
+      minter_may_update_metadata: true,
+      owner_may_update_metadata: false,
+      enable_burn: true      
+    },
+  };
+
+  const [nftContractHash, nftContractAddress] = await initializeContract(
     client,
-    "snip721-upgradable.wasm"
+    "wasm/snip721_upgradable.wasm",
+    initMsg1,
   );
 
-  var clientInfo: [SecretNetworkClient, string, string] = [
+  let initMsg2 = {
+    name: "test_NFT",
+    symbol: "token_symbol",
+    token_address: nftContractAddress,
+    token_code_hash: nftContractHash,
+  };
+
+  const [providerContractHash, providerContractAddress] = await initializeContract(
     client,
-    contractHash,
-    contractAddress,
+    "wasm/metadata_provider.wasm",
+    initMsg2,
+  );
+
+  var clientInfo: [SecretNetworkClient, string, string, string, string] = [
+    client,
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
   ];
   return clientInfo;
+}
+
+async function registerProvider(
+  client: SecretNetworkClient,
+  contractHash: string,
+  contractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string,
+) {
+  const tx = await client.tx.compute.executeContract(
+    {
+      sender: client.address,
+      contractAddress: contractAddress,
+      codeHash: contractHash,
+      msg: {
+        register_metadata_provider: {
+          address: providerContractAddress,
+          code_hash: providerContractHash,
+        },
+      },
+      sentFunds: [],
+    },
+    {
+      gasLimit: 200000,
+    }
+  );
+
+
+  let txLog = tx.arrayLog!.find((log) => log.key === "register_provider")!.value;
+  console.log(`Registered Provider address is: ${txLog}`);
+
+  let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
+  console.log(parsedTransactionData);
+
+  console.log(`Register Provider used ${tx.gasUsed} gas`);
+}
+
+async function mint(
+  client: SecretNetworkClient,
+  contractHash: string,
+  contractAddress: string,
+) {
+  const tx = await client.tx.compute.executeContract(
+    {
+      sender: client.address,
+      contractAddress: contractAddress,
+      codeHash: contractHash,
+      msg: {
+        mint_nft: {
+          token_id: "001",
+          owner: client.address,
+          public_metadata: { extension: {} },
+          private_metadata: { extension: {} },
+        },
+      },
+      sentFunds: [],
+    },
+    {
+      gasLimit: 200000,
+    }
+  );
+
+  let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
+  console.log(parsedTransactionData);
+  console.log(`Mint used ${tx.gasUsed} gas`);
 }
 
 async function queryCount(
@@ -162,12 +259,12 @@ async function queryCount(
 async function incrementTx(
   client: SecretNetworkClient,
   contractHash: string,
-  contractAddess: string
+  contractAddress: string
 ) {
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
-      contractAddress: contractAddess,
+      contractAddress: contractAddress,
       codeHash: contractHash,
       msg: {
         increment: {},
@@ -183,43 +280,32 @@ async function incrementTx(
   console.log(`Increment TX used ${tx.gasUsed} gas`);
 }
 
-async function resetTx(
-  client: SecretNetworkClient,
-  contractHash: string,
-  contractAddess: string
-) {
-  const tx = await client.tx.compute.executeContract(
-    {
-      sender: client.address,
-      contractAddress: contractAddess,
-      codeHash: contractHash,
-      msg: {
-        reser: { count: 0 },
-      },
-      sentFunds: [],
-    },
-    {
-      gasLimit: 200000,
-    }
-  );
-
-  console.log(`Reset TX used ${tx.gasUsed} gas`);
-}
-
 // The following functions are only some examples of how to write integration tests, there are many tests that we might want to write here.
-async function test_count_on_intialization(
+async function test_register_provider(
   client: SecretNetworkClient,
   contractHash: string,
-  contractAddress: string
+  contractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string
 ) {
-  const onInitializationCounter: number = await queryCount(
+  await registerProvider(
     client,
     contractHash,
-    contractAddress
+    contractAddress,
+    providerContractHash,
+    providerContractAddress,
   );
-  assert(
-    onInitializationCounter === 4,
-    `The counter on initialization expected to be 4 instead of ${onInitializationCounter}`
+}
+
+async function test_mint(
+  client: SecretNetworkClient,
+  contractHash: string,
+  contractAddress: string,
+) {
+  await mint(
+    client,
+    contractHash,
+    contractAddress,
   );
 }
 
@@ -253,39 +339,63 @@ async function test_increment_stress(
 }
 
 async function test_gas_limits() {
-  // There is no accurate way to measue gas limits but it is actually very recommended to make sure that the gas that is used by a specific tx makes sense
+  // There is no accurate way to measure gas limits but it is actually very recommended to make sure that the gas that is used by a specific tx makes sense
 }
 
 async function runTestFunction(
   tester: (
     client: SecretNetworkClient,
     contractHash: string,
-    contractAddress: string
+    contractAddress: string,
+    providerContractHash: string,
+    providerContractAddress: string,
   ) => void,
   client: SecretNetworkClient,
   contractHash: string,
-  contractAddress: string
+  contractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string,
 ) {
   console.log(`Testing ${tester.name}`);
-  await tester(client, contractHash, contractAddress);
+  await tester(client, contractHash, contractAddress, providerContractHash, providerContractAddress);
   console.log(`[SUCCESS] ${tester.name}`);
 }
 
 (async () => {
-  const [client, contractHash, contractAddress] =
+  const [client, nftContractHash, nftContractAddress, providerContractHash, providerContractAddress] =
     await initializeAndUploadContract();
 
   await runTestFunction(
-    test_count_on_intialization,
+    test_mint,
     client,
-    contractHash,
-    contractAddress
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
   );
   await runTestFunction(
-    test_increment_stress,
+    test_register_provider,
     client,
-    contractHash,
-    contractAddress
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
   );
-  await runTestFunction(test_gas_limits, client, contractHash, contractAddress);
+  // await runTestFunction(
+  //   test_set_metadata,
+  //   client,
+  //   nftContractHash,
+  //   nftContractAddress,
+  //   providerContractHash,
+  //   providerContractAddress
+  // );
+  // await runTestFunction(
+  //   test_query_metadata,
+  //   client,
+  //   nftContractHash,
+  //   nftContractAddress,
+  //   providerContractHash,
+  //   providerContractAddress
+  // );
+  await runTestFunction(test_gas_limits, client, nftContractHash, nftContractAddress, providerContractHash, providerContractAddress);
 })();
