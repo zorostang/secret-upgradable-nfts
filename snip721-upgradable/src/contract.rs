@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use secret_toolkit::{
     permit::{validate, Permit, RevokedPermits},
-    utils::{pad_handle_result, pad_query_result, types::Contract, Query},
+    utils::{pad_handle_result, pad_query_result, types::Contract, Query, HandleCallback},
 };
 
 use crate::expiration::Expiration;
@@ -19,7 +19,7 @@ use crate::inventory::{Inventory, InventoryIter};
 use crate::mint_run::{SerialNumber, StoredMintRunInfo};
 use crate::msg::{
     AccessLevel, BatchNftDossierElement, Burn, ContractStatus, Cw721Approval, Cw721OwnerOfResponse,
-    HandleAnswer, HandleMsg, InitMsg, Mint, NftInfoResponse, QueryAnswer, QueryMsg,
+    HandleAnswer, HandleMsg, HandleProviderMsg, InitMsg, Mint, NftInfoResponse, QueryAnswer, QueryMsg,
     QueryProviderMsg, QueryWithPermit, ReceiverInfo, ResponseStatus::Success, Send,
     Snip721Approval, Transfer, ViewerInfo,
 };
@@ -781,14 +781,46 @@ pub fn set_metadata<S: Storage, A: Api, Q: Querier>(
             return Err(StdError::generic_err(custom_err));
         }
     }
-    if let Some(public) = public_metadata {
-        set_metadata_impl(&mut deps.storage, &token, idx, PREFIX_PUB_META, &public)?;
+
+    // instead of using these to two if statements,
+    // create a handle message that sends the data to the provider contract
+
+    // if let Some(public) = public_metadata {
+    //     set_metadata_impl(&mut deps.storage, &token, idx, PREFIX_PUB_META, &public)?;
+    // }
+    // if let Some(private) = private_metadata {
+    //     set_metadata_impl(&mut deps.storage, &token, idx, PREFIX_PRIV_META, &private)?;
+    // }
+
+    // do not allow the altering of sealed metadata
+    if !token.unwrapped && private_metadata.is_some() {
+        return Err(StdError::generic_err(
+            "The private metadata of a sealed token can not be modified",
+        ));
     }
-    if let Some(private) = private_metadata {
-        set_metadata_impl(&mut deps.storage, &token, idx, PREFIX_PRIV_META, &private)?;
-    }
+
+    // TODO
+    // let provider_store = ReadOnlyPrefixedStorage::etc;
+    // let provider = load(&provider_store, provider_addr.as_bytes());
+
+    let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
+
+    let set_metadata_msg = HandleProviderMsg::SetMetadata {
+        token_id: token_id.to_string(),
+        idx,
+        public_metadata,
+        private_metadata,
+        padding: None 
+    };
+
+    let cosmos_msg = set_metadata_msg.to_cosmos_msg(
+        provider.hash,
+        provider.address,
+        None
+    )?;
+
     Ok(HandleResponse {
-        messages: vec![],
+        messages: vec![cosmos_msg],
         log: vec![],
         data: Some(to_binary(&HandleAnswer::SetMetadata { status: Success })?),
     })
@@ -2251,11 +2283,11 @@ pub fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     let map2idx = ReadonlyPrefixedStorage::new(PREFIX_MAP_TO_INDEX, &deps.storage);
     let may_idx: Option<u32> = may_load(&map2idx, token_id.as_bytes())?;
     // if token id was found
-    if let Some(_idx) = may_idx {
+    if let Some(idx) = may_idx {
         // load metadata provider contract info
         let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
         // query the provider contract
-        let nft_info_query = QueryProviderMsg::NftInfo { token_id };
+        let nft_info_query = QueryProviderMsg::NftInfo { token_idx: idx };
         let meta_response: NftInfoResponse = nft_info_query
             .query(&deps.querier, provider.hash, provider.address)
             .unwrap_or_default();

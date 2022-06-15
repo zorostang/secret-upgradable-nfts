@@ -24,6 +24,8 @@ pub enum HandleMsg {
     SetMetadata {
         /// id of the token whose metadata should be updated
         token_id: String,
+        /// token index
+        idx: u32,
         /// the optional new public metadata
         public_metadata: Option<Metadata>,
         /// the optional new private metadata
@@ -72,7 +74,7 @@ pub enum HandleAnswer {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     /// displays the public metadata of a token
-    NftInfo { token_id: String },
+    NftInfo { token_idx: u32 },
     /// displays the private metadata if permitted to view it
     PrivateMetadata {
         token_id: String,

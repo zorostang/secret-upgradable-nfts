@@ -51,6 +51,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     let response = match msg {
         HandleMsg::SetMetadata {
             token_id,
+            idx,
             public_metadata,
             private_metadata,
             ..
@@ -59,6 +60,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             env,
             &config,
             &token_id,
+            idx,
             public_metadata,
             private_metadata,
         ),
@@ -78,14 +80,63 @@ pub fn handle_set_metadata<S: Storage, A: Api, Q: Querier>(
     env: Env,
     config: &Config,
     token_id: &str,
+    idx: u32,
     public_metadata: Option<Metadata>,
     private_metadata: Option<Metadata>,
 ) -> HandleResult {
+
+    if let Some(public) = public_metadata {
+        set_metadata_impl(&mut deps.storage, idx, PREFIX_PUB_META, &public)?;
+    }
+    if let Some(private) = private_metadata {
+        set_metadata_impl(&mut deps.storage, idx, PREFIX_PRIV_META, &private)?;
+    }
+    
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
         data: Some(to_binary(&HandleAnswer::SetMetadata { status: Success })?),
     })
+}
+
+/// Returns StdResult<()>
+///
+/// sets new metadata
+///
+/// # Arguments
+///
+/// * `storage` - a mutable reference to the contract's storage
+/// * `token` - a reference to the token whose metadata should be updated
+/// * `idx` - the token identifier index
+/// * `prefix` - storage prefix for the type of metadata being updated
+/// * `metadata` - a reference to the new metadata
+#[allow(clippy::too_many_arguments)]
+fn set_metadata_impl<S: Storage>(
+    storage: &mut S,
+    idx: u32,
+    prefix: &[u8],
+    metadata: &Metadata,
+) -> StdResult<()> {
+    enforce_metadata_field_exclusion(metadata)?;
+    let mut meta_store = PrefixedStorage::new(prefix, storage);
+    save(&mut meta_store, &idx.to_le_bytes(), metadata)?;
+    Ok(())
+}
+
+/// Returns StdResult<()>
+///
+/// makes sure that Metadata does not have both `token_uri` and `extension`
+///
+/// # Arguments
+///
+/// * `metadata` - a reference to Metadata
+fn enforce_metadata_field_exclusion(metadata: &Metadata) -> StdResult<()> {
+    if metadata.token_uri.is_some() && metadata.extension.is_some() {
+        return Err(StdError::generic_err(
+            "Metadata can not have BOTH token_uri AND extension",
+        ));
+    }
+    Ok(())
 }
 
 pub fn handle_create_key<S: Storage, A: Api, Q: Querier>(
@@ -150,7 +201,7 @@ pub fn handle_change_admin<S: Storage, A: Api, Q: Querier>(
 
 pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
     let response = match msg {
-        QueryMsg::NftInfo { token_id } => query_nft_info(deps, &token_id),
+        QueryMsg::NftInfo { token_idx } => query_nft_info(deps, &token_idx),
         QueryMsg::PrivateMetadata { token_id, viewer } => query_private_metadata(deps, &token_id),
     };
     pad_query_result(response, BLOCK_SIZE)
@@ -158,10 +209,10 @@ pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryM
 
 fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    token_id: &str,
+    token_idx: &u32,
 ) -> QueryResult {
     let meta_store = ReadonlyPrefixedStorage::new(PREFIX_PUB_META, &deps.storage);
-    let meta: Metadata = may_load(&meta_store, token_id.as_ref())?.unwrap_or_default();
+    let meta: Metadata = may_load(&meta_store, &token_idx.to_le_bytes())?.unwrap_or_default();
 
     to_binary(&QueryAnswer::NftInfo {
         token_uri: meta.token_uri,

@@ -234,6 +234,98 @@ async function mint(
   console.log(`Mint used ${tx.gasUsed} gas`);
 }
 
+async function setMetadata(
+  client: SecretNetworkClient,
+  providerContractHash: string,
+  providerContractAddress: string,
+) {
+  const tx = await client.tx.compute.executeContract(
+    {
+      sender: client.address,
+      contractAddress: providerContractAddress,
+      codeHash: providerContractHash,
+      msg: {
+        set_metadata: {
+          token_id: "001",
+          public_metadata: {
+            extension: {
+              name: "test name",
+              description: "hello world",
+            }
+          },
+          private_metadata: {
+            extension: {
+              name: "private name",
+              description: "hello world, but private",
+            }
+          },
+        }
+      },
+      sentFunds: [],
+    },
+    {
+      gasLimit: 200000,
+    }
+  );
+
+  let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
+  console.log(parsedTransactionData);
+  console.log(`Set Metadata ${tx.gasUsed} gas`);
+}
+
+async function queryNftInfo(
+  client: SecretNetworkClient,
+  nftContractHash: string,
+  nftContractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string,
+) {
+  interface ViewerInfo {
+    address: string;
+    viewing_key: string;
+  }
+
+  interface Trait {
+    display_type?: string;
+    trait_type?: string;
+    value: string;
+    max_value?: string;
+  }
+  interface Authentication {
+    key?: string;
+    user?: string;
+  }
+  interface MediaFile {
+    file_type?: string;
+    extension?: string;
+    authentication?: Authentication;
+    url: string;
+  }
+  interface Extension {
+    image?: string;
+    image_data?: string;
+    external_url?: string;
+    description?: string;
+    name?: string;
+    attributes?: Trait[];
+    media?: MediaFile[];
+    protected_attributes: string[];
+  }
+  interface Metadata {
+    token_uri?: string;
+    extension?: Extension;
+  }
+
+  const response = (await client.query.compute.queryContract({
+    contractAddress: nftContractAddress,
+    codeHash: nftContractHash,
+    query: { nft_info: { token_id: "001" } }
+  })) as Metadata;
+
+  console.log(JSON.stringify(response,null,2));
+}
+
+
 async function queryCount(
   client: SecretNetworkClient,
   contractHash: string,
@@ -256,42 +348,18 @@ async function queryCount(
   return countResponse.count;
 }
 
-async function incrementTx(
-  client: SecretNetworkClient,
-  contractHash: string,
-  contractAddress: string
-) {
-  const tx = await client.tx.compute.executeContract(
-    {
-      sender: client.address,
-      contractAddress: contractAddress,
-      codeHash: contractHash,
-      msg: {
-        increment: {},
-      },
-      sentFunds: [],
-    },
-    {
-      gasLimit: 200000,
-    }
-  );
-
-  //let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0])); // In our case we don't really need to access transaction data
-  console.log(`Increment TX used ${tx.gasUsed} gas`);
-}
-
 // The following functions are only some examples of how to write integration tests, there are many tests that we might want to write here.
 async function test_register_provider(
   client: SecretNetworkClient,
-  contractHash: string,
-  contractAddress: string,
+  nftContractHash: string,
+  nftContractAddress: string,
   providerContractHash: string,
   providerContractAddress: string
 ) {
   await registerProvider(
     client,
-    contractHash,
-    contractAddress,
+    nftContractHash,
+    nftContractAddress,
     providerContractHash,
     providerContractAddress,
   );
@@ -299,42 +367,41 @@ async function test_register_provider(
 
 async function test_mint(
   client: SecretNetworkClient,
-  contractHash: string,
-  contractAddress: string,
+  nftContractHash: string,
+  nftContractAddress: string,
 ) {
   await mint(
     client,
-    contractHash,
-    contractAddress,
+    nftContractHash,
+    nftContractAddress,
   );
 }
 
-async function test_increment_stress(
+async function test_set_metadata(
   client: SecretNetworkClient,
-  contractHash: string,
-  contractAddress: string
+  providerContractHash: string,
+  providerContractAddress: string,
 ) {
-  const onStartCounter: number = await queryCount(
+  await setMetadata(
     client,
-    contractHash,
-    contractAddress
+    providerContractHash,
+    providerContractAddress,
   );
+}
 
-  let stressLoad: number = 10;
-  for (let i = 0; i < stressLoad; ++i) {
-    await incrementTx(client, contractHash, contractAddress);
-  }
-
-  const afterStressCounter: number = await queryCount(
+async function test_query_metadata(
+  client: SecretNetworkClient,
+  nftContractHash: string,
+  nftContractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string,
+) {
+  await queryNftInfo(
     client,
-    contractHash,
-    contractAddress
-  );
-  assert(
-    afterStressCounter - onStartCounter === stressLoad,
-    `After running stress test the counter expected to be ${
-      onStartCounter + 10
-    } instead of ${afterStressCounter}`
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
   );
 }
 
@@ -345,19 +412,19 @@ async function test_gas_limits() {
 async function runTestFunction(
   tester: (
     client: SecretNetworkClient,
-    contractHash: string,
-    contractAddress: string,
+    nftContractHash: string,
+    nftContractAddress: string,
     providerContractHash: string,
     providerContractAddress: string,
   ) => void,
   client: SecretNetworkClient,
-  contractHash: string,
-  contractAddress: string,
+  nftContractHash: string,
+  nftContractAddress: string,
   providerContractHash: string,
   providerContractAddress: string,
 ) {
   console.log(`Testing ${tester.name}`);
-  await tester(client, contractHash, contractAddress, providerContractHash, providerContractAddress);
+  await tester(client, nftContractHash, nftContractAddress, providerContractHash, providerContractAddress);
   console.log(`[SUCCESS] ${tester.name}`);
 }
 
@@ -381,21 +448,21 @@ async function runTestFunction(
     providerContractHash,
     providerContractAddress
   );
-  // await runTestFunction(
-  //   test_set_metadata,
-  //   client,
-  //   nftContractHash,
-  //   nftContractAddress,
-  //   providerContractHash,
-  //   providerContractAddress
-  // );
-  // await runTestFunction(
-  //   test_query_metadata,
-  //   client,
-  //   nftContractHash,
-  //   nftContractAddress,
-  //   providerContractHash,
-  //   providerContractAddress
-  // );
+  await runTestFunction(
+    test_set_metadata,
+    client,
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
+  );
+  await runTestFunction(
+    test_query_metadata,
+    client,
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
+  );
   await runTestFunction(test_gas_limits, client, nftContractHash, nftContractAddress, providerContractHash, providerContractAddress);
 })();

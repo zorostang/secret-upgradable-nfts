@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::{Binary, Coin, HumanAddr};
 use secret_toolkit::permit::Permit;
-use secret_toolkit::utils::Query;
+use secret_toolkit::utils::{Query, HandleCallback};
 
 use crate::expiration::Expiration;
 use crate::mint_run::{MintRunInfo, SerialNumber};
 use crate::royalties::{DisplayRoyaltyInfo, RoyaltyInfo};
-use crate::token::{Extension, Metadata};
+use crate::token::{Extension, Metadata, Token};
 
 /// Instantiation message
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -417,6 +417,27 @@ pub enum HandleMsg {
         previous_code_hash: String,
         new_code_hash: String,
     },
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HandleProviderMsg {
+    SetMetadata {
+        /// id of the token whose metadata should be updated
+        token_id: String,
+        /// token index
+        idx: u32,
+        /// the optional new public metadata
+        public_metadata: Option<Metadata>,
+        /// the optional new private metadata
+        private_metadata: Option<Metadata>,
+        /// optional message length padding
+        padding: Option<String>,
+    },
+}
+
+impl HandleCallback for HandleProviderMsg {
+    const BLOCK_SIZE: usize = 256;
 }
 
 /// permission access level
@@ -1149,7 +1170,8 @@ pub enum QueryWithPermit {
 #[serde(rename_all = "snake_case")]
 pub enum QueryProviderMsg {
     /// displays the public metadata of a token
-    NftInfo { token_id: String },
+    /// uses token index instead of id
+    NftInfo { token_idx: u32 },
 }
 
 impl Query for QueryProviderMsg {
