@@ -1172,6 +1172,13 @@ pub enum QueryProviderMsg {
     /// displays the public metadata of a token
     /// uses token index instead of id
     NftInfo { token_idx: u32 },
+    /// displays the private metadata if permitted to view it
+    /// uses token index instead of id
+    PrivateMetadata {
+        token_idx: u32,
+        /// optional address and key requesting to view the private metadata
+        viewer: Option<ViewerInfo>,
+    },
 }
 
 impl Query for QueryProviderMsg {
@@ -1181,4 +1188,9 @@ impl Query for QueryProviderMsg {
 #[derive(Serialize, Deserialize, Default)]
 pub struct NftInfoResponse {
     pub nft_info: Metadata,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct PrivateMetadataResponse {
+    pub private_metadata: Metadata,
 }

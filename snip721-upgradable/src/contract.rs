@@ -14,7 +14,7 @@ use secret_toolkit::{
     utils::{pad_handle_result, pad_query_result, types::Contract, Query, HandleCallback},
 };
 
-use crate::expiration::Expiration;
+use crate::{expiration::Expiration, msg::PrivateMetadataResponse};
 use crate::inventory::{Inventory, InventoryIter};
 use crate::mint_run::{SerialNumber, StoredMintRunInfo};
 use crate::msg::{
@@ -2331,7 +2331,7 @@ pub fn query_private_meta<S: Storage, A: Api, Q: Querier>(
     viewer: Option<ViewerInfo>,
     from_permit: Option<CanonicalAddr>,
 ) -> QueryResult {
-    let prep_info = query_token_prep(deps, token_id, viewer, from_permit)?;
+    let prep_info = query_token_prep(deps, token_id, viewer.clone(), from_permit)?;
     check_perm_core(
         deps,
         &prep_info.block,
@@ -2349,14 +2349,20 @@ pub fn query_private_meta<S: Storage, A: Api, Q: Querier>(
             "Sealed metadata must be unwrapped by calling Reveal before it can be viewed",
         ));
     }
-    let meta_store = ReadonlyPrefixedStorage::new(PREFIX_PRIV_META, &deps.storage);
-    let meta: Metadata = may_load(&meta_store, &prep_info.idx.to_le_bytes())?.unwrap_or(Metadata {
-        token_uri: None,
-        extension: None,
-    });
+    // load metadata provider contract info
+    let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
+    // query the provider contract
+    let private_metadata_query = QueryProviderMsg::PrivateMetadata { token_idx: prep_info.idx, viewer };
+    let meta_response: PrivateMetadataResponse = private_metadata_query
+        .query(&deps.querier, provider.hash, provider.address)
+        .unwrap_or_default();
+
+    let token_uri = meta_response.private_metadata.token_uri;
+    let extension = meta_response.private_metadata.extension;
+
     to_binary(&QueryAnswer::PrivateMetadata {
-        token_uri: meta.token_uri,
-        extension: meta.extension,
+        token_uri,
+        extension,
     })
 }
 

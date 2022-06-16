@@ -236,14 +236,14 @@ async function mint(
 
 async function setMetadata(
   client: SecretNetworkClient,
-  providerContractHash: string,
-  providerContractAddress: string,
+  nftContractHash: string,
+  nftContractAddress: string,
 ) {
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
-      contractAddress: providerContractAddress,
-      codeHash: providerContractHash,
+      contractAddress: nftContractAddress,
+      codeHash: nftContractHash,
       msg: {
         set_metadata: {
           token_id: "001",
@@ -271,6 +271,31 @@ async function setMetadata(
   let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
   console.log(parsedTransactionData);
   console.log(`Set Metadata ${tx.gasUsed} gas`);
+}
+
+async function setViewingKey(
+  client: SecretNetworkClient,
+  nftContractHash: string,
+  nftContractAddress: string,
+) {
+  const tx = await client.tx.compute.executeContract(
+    {
+      sender: client.address,
+      contractAddress: nftContractAddress,
+      codeHash: nftContractHash,
+      msg: {
+        set_viewing_key: { key: "password" }
+      },
+      sentFunds: [],
+    },
+    {
+      gasLimit: 200000,
+    }
+  );
+
+  let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
+  console.log(parsedTransactionData);
+  console.log(`Set Viewing Key used ${tx.gasUsed} gas`);
 }
 
 async function queryNftInfo(
@@ -325,6 +350,65 @@ async function queryNftInfo(
   console.log(JSON.stringify(response,null,2));
 }
 
+async function queryPrivateMetadata(
+  client: SecretNetworkClient,
+  nftContractHash: string,
+  nftContractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string,
+) {
+  interface ViewerInfo {
+    address: string;
+    viewing_key: string;
+  }
+
+  interface Trait {
+    display_type?: string;
+    trait_type?: string;
+    value: string;
+    max_value?: string;
+  }
+  interface Authentication {
+    key?: string;
+    user?: string;
+  }
+  interface MediaFile {
+    file_type?: string;
+    extension?: string;
+    authentication?: Authentication;
+    url: string;
+  }
+  interface Extension {
+    image?: string;
+    image_data?: string;
+    external_url?: string;
+    description?: string;
+    name?: string;
+    attributes?: Trait[];
+    media?: MediaFile[];
+    protected_attributes: string[];
+  }
+  interface Metadata {
+    token_uri?: string;
+    extension?: Extension;
+  }
+
+  const response = (await client.query.compute.queryContract({
+    contractAddress: nftContractAddress,
+    codeHash: nftContractHash,
+    query: { 
+      private_metadata: {
+        token_id: "001",
+        viewer: {
+          address: client.address,
+          viewing_key: "password",
+        }
+      }
+    }
+  })) as Metadata;
+
+  console.log(JSON.stringify(response,null,2));
+}
 
 async function queryCount(
   client: SecretNetworkClient,
@@ -379,13 +463,13 @@ async function test_mint(
 
 async function test_set_metadata(
   client: SecretNetworkClient,
-  providerContractHash: string,
-  providerContractAddress: string,
+  nftContractHash: string,
+  nftContractAddress: string,
 ) {
   await setMetadata(
     client,
-    providerContractHash,
-    providerContractAddress,
+    nftContractHash,
+    nftContractAddress,
   );
 }
 
@@ -397,6 +481,18 @@ async function test_query_metadata(
   providerContractAddress: string,
 ) {
   await queryNftInfo(
+    client,
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
+  );
+  await setViewingKey(
+    client,
+    nftContractHash,
+    nftContractAddress,
+  );
+  await queryPrivateMetadata(
     client,
     nftContractHash,
     nftContractAddress,
@@ -431,6 +527,9 @@ async function runTestFunction(
 (async () => {
   const [client, nftContractHash, nftContractAddress, providerContractHash, providerContractAddress] =
     await initializeAndUploadContract();
+
+    console.log(`nft contract: ${nftContractAddress}`);
+    console.log(`provider contract: ${providerContractAddress}`);
 
   await runTestFunction(
     test_mint,
