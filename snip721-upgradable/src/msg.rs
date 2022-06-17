@@ -434,6 +434,12 @@ pub enum HandleProviderMsg {
         /// optional message length padding
         padding: Option<String>,
     },
+    SetViewingKey {
+        /// desired viewing key
+        key: String,
+        /// optional message length padding
+        padding: Option<String>,
+    }
 }
 
 impl HandleCallback for HandleProviderMsg {
@@ -1170,12 +1176,14 @@ pub enum QueryWithPermit {
 #[serde(rename_all = "snake_case")]
 pub enum QueryProviderMsg {
     /// displays the public metadata of a token
-    /// uses token index instead of id
-    NftInfo { token_idx: u32 },
+    NftInfo {
+        token_id: String,
+        /// address and key requesting to view the private metadata
+        viewer: Option<ViewerInfo>,
+    },
     /// displays the private metadata if permitted to view it
-    /// uses token index instead of id
     PrivateMetadata {
-        token_idx: u32,
+        token_id: String,
         /// optional address and key requesting to view the private metadata
         viewer: Option<ViewerInfo>,
     },

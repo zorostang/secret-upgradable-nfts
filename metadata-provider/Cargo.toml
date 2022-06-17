@@ -29,6 +29,11 @@ schemars = "0.7"
 cosmwasm-std = { version = "0.10", package = "secret-cosmwasm-std" }
 cosmwasm-storage = { version = "0.10", package = "secret-cosmwasm-storage" }
 secret-toolkit = { version = "0.3.0", default-features = false, features = ["permit", "serialization", "snip721", "storage", "viewing-key"] }
+rand_chacha = { version = "0.2.2", default-features = false }
+rand_core = { version =  "0.5.1", default-features = false }
+sha2 = { version = "0.9.1", default-features = false }
+subtle = { version = "2.2.3", default-features = false }
+base64 = "0.12.3"
 
 [dev-dependencies]
 cosmwasm-schema = "0.10.1"

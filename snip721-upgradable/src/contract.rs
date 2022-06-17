@@ -478,22 +478,34 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 /// * `code_hash` - code hash for the new metadata provider
 pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    _env: Env,
+    env: Env,
     address: HumanAddr,
     code_hash: String,
 ) -> HandleResult {
     let provider = Contract {
         address: address.clone(),
-        hash: code_hash,
+        hash: code_hash.clone(),
     };
     save(&mut deps.storage, PROVIDER_KEY, &provider)?;
+
+    // create a viewing key that is used to query the provider contract
+    let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
+    let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
+    let canonical_address = deps.api.canonical_address(&address)?;
+    let mut key_store = PrefixedStorage::new(PROVIDER_KEY, &mut deps.storage);
+    save(&mut key_store, canonical_address.as_slice(), &key)?; // is it okay to save the key unhashed?
 
     // need to implement some kind of list for multiple providers, like an appendstore
     // will need the ability to iterate over the list of providers,
     // as well as match them to a list of providers if given as input
 
+    let key = format!("{}", key);
+
+    let set_key_msg = HandleProviderMsg::SetViewingKey { key, padding: None }
+        .to_cosmos_msg(provider.hash, provider.address, None)?;
+
     Ok(HandleResponse {
-        messages: vec![],
+        messages: vec![set_key_msg],
         log: vec![log("register_provider", &address)],
         data: Some(to_binary(&HandleAnswer::RegisterMetadataProvider {
             status: Success,
@@ -587,10 +599,10 @@ pub fn mint<S: Storage, A: Api, Q: Querier>(
         ));
     }
     let mints = vec![Mint {
-        token_id,
+        token_id: token_id.clone(),
         owner,
-        public_metadata,
-        private_metadata,
+        public_metadata: public_metadata.clone(),
+        private_metadata: private_metadata.clone(),
         serial_number,
         royalty_info,
         transferable,
@@ -598,8 +610,28 @@ pub fn mint<S: Storage, A: Api, Q: Querier>(
     }];
     let mut minted = mint_list(deps, &env, config, &sender_raw, mints)?;
     let minted_str = minted.pop().unwrap_or_default();
+
+    // send a message to the provider contract to set the metadata for this token
+    // new stuff
+    let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
+
+    let set_metadata_msg = HandleProviderMsg::SetMetadata {
+        token_id: token_id.unwrap_or(format!("{}", config.mint_cnt)),
+        idx: config.mint_cnt,
+        public_metadata,
+        private_metadata,
+        padding: None 
+    };
+
+    let cosmos_msg = set_metadata_msg.to_cosmos_msg(
+        provider.hash,
+        provider.address,
+        None
+    )?;
+    // new stuff
+
     Ok(HandleResponse {
-        messages: vec![],
+        messages: vec![cosmos_msg],
         log: vec![log("minted", &minted_str)],
         data: Some(to_binary(&HandleAnswer::MintNft {
             token_id: minted_str,
@@ -2283,11 +2315,20 @@ pub fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     let map2idx = ReadonlyPrefixedStorage::new(PREFIX_MAP_TO_INDEX, &deps.storage);
     let may_idx: Option<u32> = may_load(&map2idx, token_id.as_bytes())?;
     // if token id was found
-    if let Some(idx) = may_idx {
+    if let Some(_idx) = may_idx {
         // load metadata provider contract info
+        // refactor this later
         let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
+        let canonical_provider_address = deps.api.canonical_address(&provider.address)?;
+        let key_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
+        let provider_vk: ViewingKey = load(&key_store, canonical_provider_address.as_slice())?;
+        let viewer = ViewerInfo {
+            address: provider.address.clone(),
+            viewing_key: provider_vk.to_string(),
+        };
+
         // query the provider contract
-        let nft_info_query = QueryProviderMsg::NftInfo { token_idx: idx };
+        let nft_info_query = QueryProviderMsg::NftInfo { token_id, viewer: Some(viewer) };
         let meta_response: NftInfoResponse = nft_info_query
             .query(&deps.querier, provider.hash, provider.address)
             .unwrap_or_default();
@@ -2352,7 +2393,7 @@ pub fn query_private_meta<S: Storage, A: Api, Q: Querier>(
     // load metadata provider contract info
     let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
     // query the provider contract
-    let private_metadata_query = QueryProviderMsg::PrivateMetadata { token_idx: prep_info.idx, viewer };
+    let private_metadata_query = QueryProviderMsg::PrivateMetadata { token_id: token_id.to_string(), viewer }; // is it inefficient to convert token_id back to String?
     let meta_response: PrivateMetadataResponse = private_metadata_query
         .query(&deps.querier, provider.hash, provider.address)
         .unwrap_or_default();
@@ -4748,6 +4789,7 @@ fn mint_list<S: Storage, A: Api, Q: Querier>(
         let mut map2id = PrefixedStorage::new(PREFIX_MAP_TO_ID, &mut deps.storage);
         save(&mut map2id, &token_key, &id)?;
 
+        // TODO decide if removing this save metadata part from this contract
         //
         // If you wanted to store an additional data struct for each NFT, you would create
         // a new prefix and store with the `token_key` like below

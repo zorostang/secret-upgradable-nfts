@@ -1,6 +1,6 @@
 use cosmwasm_std::{
     debug_print, to_binary, Api, Binary, Env, Extern, HandleResponse, HandleResult, HumanAddr,
-    InitResponse, InitResult, Querier, QueryResult, StdError, StdResult, Storage,
+    InitResponse, InitResult, Querier, QueryResult, StdError, StdResult, Storage, ReadonlyStorage, CanonicalAddr,
 };
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 
@@ -11,10 +11,10 @@ use crate::state::{
     json_may_load, json_save, load, may_load, remove, save, Config, BLOCK_KEY, CONFIG_KEY,
     CREATOR_KEY, MY_ADDRESS_KEY, PREFIX_PRIV_META, PREFIX_PUB_META, PREFIX_VIEW_KEY, PRNG_SEED_KEY,
 };
+use crate::viewing_key::{ViewingKey, VIEWING_KEY_SIZE};
 
-use secret_toolkit::snip721::{Authentication, Extension, MediaFile, Metadata, Trait};
+use secret_toolkit::snip721::{Authentication, Extension, MediaFile, Metadata, Trait, ViewerInfo};
 use secret_toolkit::utils::{pad_handle_result, pad_query_result};
-use secret_toolkit::viewing_key::{ViewingKey, ViewingKeyStore, VIEWING_KEY_SIZE};
 
 /// pad handle responses and log attributes to blocks of 256 bytes to prevent leaking info based on
 /// response size
@@ -64,9 +64,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             public_metadata,
             private_metadata,
         ),
-        HandleMsg::CreateViewingKey { entropy, .. } => {
-            handle_create_key(deps, env, &config, &entropy)
-        }
         HandleMsg::SetViewingKey { key, .. } => handle_set_key(deps, env, &config, key),
         HandleMsg::ChangeAdmin { address, .. } => {
             handle_change_admin(deps, env, &mut config, &address)
@@ -139,33 +136,13 @@ fn enforce_metadata_field_exclusion(metadata: &Metadata) -> StdResult<()> {
     Ok(())
 }
 
-pub fn handle_create_key<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    config: &Config,
-    entropy: &str,
-) -> HandleResult {
-    let key = ViewingKey::create(
-        &mut deps.storage,
-        &env,
-        &env.message.sender,
-        entropy.as_ref(),
-    );
-
-    Ok(HandleResponse {
-        messages: vec![],
-        log: vec![],
-        data: Some(to_binary(&HandleAnswer::ViewingKey { key })?),
-    })
-}
-
 pub fn handle_set_key<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     config: &Config,
     key: String,
 ) -> HandleResult {
-    ViewingKey::set(&mut deps.storage, &env.message.sender, key.as_str());
+    save(&mut deps.storage, PREFIX_VIEW_KEY, &ViewingKey(key.clone()).to_hashed())?;
 
     Ok(HandleResponse {
         messages: vec![],
@@ -201,18 +178,19 @@ pub fn handle_change_admin<S: Storage, A: Api, Q: Querier>(
 
 pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
     let response = match msg {
-        QueryMsg::NftInfo { token_idx } => query_nft_info(deps, &token_idx),
-        QueryMsg::PrivateMetadata { token_id, viewer } => query_private_metadata(deps, &token_id),
+        QueryMsg::NftInfo { token_id, viewer } => query_nft_info(deps, &token_id, &viewer),
+        QueryMsg::PrivateMetadata { token_id, viewer } => query_private_metadata(deps, &token_id, &viewer),
     };
     pad_query_result(response, BLOCK_SIZE)
 }
 
 fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    token_idx: &u32,
+    token_id: &str,
+    viewer: &Option<ViewerInfo>,
 ) -> QueryResult {
     let meta_store = ReadonlyPrefixedStorage::new(PREFIX_PUB_META, &deps.storage);
-    let meta: Metadata = may_load(&meta_store, &token_idx.to_le_bytes())?.unwrap_or_default();
+    let meta: Metadata = may_load(&meta_store, &token_id.as_bytes())?.unwrap_or_default();
 
     to_binary(&QueryAnswer::NftInfo {
         token_uri: meta.token_uri,
@@ -223,12 +201,39 @@ fn query_nft_info<S: Storage, A: Api, Q: Querier>(
 fn query_private_metadata<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     token_id: &str,
+    viewer: &Option<ViewerInfo>,
 ) -> QueryResult {
     let meta_store = ReadonlyPrefixedStorage::new(PREFIX_PRIV_META, &deps.storage);
-    let meta: Metadata = may_load(&meta_store, token_id.as_ref())?.unwrap_or_default();
+    let meta: Metadata = may_load(&meta_store, &token_id.as_bytes())?.unwrap_or_default();
 
     to_binary(&QueryAnswer::PrivateMetadata {
         token_uri: meta.token_uri,
         extension: meta.extension,
     })
+}
+
+/// Returns StdResult<bool> result of validating an address' viewing key
+///
+/// # Arguments
+///
+/// * `storage` - a reference to the contract's storage
+/// * `address` - a reference to the address whose key should be validated
+/// * `viewing_key` - String key used for authentication
+fn check_key<S: ReadonlyStorage>(
+    storage: &S,
+    address: &CanonicalAddr,
+    viewing_key: String,
+) -> StdResult<()> {
+    // load the address' key
+    let read_key = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, storage);
+    let load_key: [u8; VIEWING_KEY_SIZE] =
+        may_load(&read_key, address.as_slice())?.unwrap_or([0u8; VIEWING_KEY_SIZE]);
+    let input_key = ViewingKey(viewing_key);
+    // if key matches
+    if input_key.check_viewing_key(&load_key) {
+        return Ok(());
+    }
+    Err(StdError::generic_err(
+        "Wrong viewing key for this address or viewing key not set",
+    ))
 }

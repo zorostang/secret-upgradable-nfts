@@ -33,13 +33,6 @@ pub enum HandleMsg {
         /// optional message length padding
         padding: Option<String>,
     },
-    /// create a viewing key
-    CreateViewingKey {
-        /// entropy String used in random key generation
-        entropy: String,
-        /// optional message length padding
-        padding: Option<String>,
-    },
     /// set viewing key
     SetViewingKey {
         /// desired viewing key
@@ -74,11 +67,15 @@ pub enum HandleAnswer {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     /// displays the public metadata of a token
-    NftInfo { token_idx: u32 },
+    NftInfo { 
+        token_id: String,
+        /// address and key requesting to view the private metadata
+        viewer: Option<ViewerInfo>,
+    },
     /// displays the private metadata if permitted to view it
     PrivateMetadata {
         token_id: String,
-        /// optional address and key requesting to view the private metadata
+        /// address and key requesting to view the private metadata
         viewer: Option<ViewerInfo>,
     },
 }
