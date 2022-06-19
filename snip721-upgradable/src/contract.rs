@@ -500,9 +500,8 @@ pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
     let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
     let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
     save(&mut key_store, canonical_address.as_slice(), &key)?; // is it okay to save the key unhashed?
-    let key = format!("{}", key);
 
-    let set_key_msg = HandleProviderMsg::SetViewingKey { key, padding: None }
+    let set_key_msg = HandleProviderMsg::SetViewingKey { key: key.to_string(), padding: None }
         .to_cosmos_msg(provider.hash, provider.address, None)?;
 
     Ok(HandleResponse {
@@ -2336,19 +2335,23 @@ pub fn query_nft_info<S: Storage, A: Api, Q: Querier>(
         // refactor this later
         let provider_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
         let provider: Contract = load(&provider_store, &[1u8])?;
-        let canonical_provider_address = deps.api.canonical_address(&provider.address)?;
-        let key_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
-        let provider_vk: ViewingKey = load(&key_store, canonical_provider_address.as_slice())?;
+        // load this contract address
+        let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;
+        let my_address: HumanAddr = deps.api.human_address(&my_address)?;
+        // load viewing key for given provider address
+        let provider_address: CanonicalAddr = deps.api.canonical_address(&provider.address)?;
+        let key_store = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
+        let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
+
         let viewer = ViewerInfo {
-            address: provider.address.clone(),
+            address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
             viewing_key: provider_vk.to_string(),
         };
 
         // query the provider contract
         let nft_info_query = QueryProviderMsg::NftInfo { token_id, viewer: Some(viewer) };
         let meta_response: NftInfoResponse = nft_info_query
-            .query(&deps.querier, provider.hash, provider.address)
-            .unwrap_or_default();
+            .query(&deps.querier, provider.hash, provider.address)?;
 
         let token_uri = meta_response.nft_info.token_uri;
         let extension = meta_response.nft_info.extension;
@@ -2408,12 +2411,25 @@ pub fn query_private_meta<S: Storage, A: Api, Q: Querier>(
         ));
     }
     // load metadata provider contract info
-    let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
+    // refactor this later
+    let provider_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
+    let provider: Contract = load(&provider_store, &[1u8])?;
+    // load this contract address
+    let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;
+    let my_address: HumanAddr = deps.api.human_address(&my_address)?;
+    // load viewing key for given provider address
+    let provider_address: CanonicalAddr = deps.api.canonical_address(&provider.address)?;
+    let key_store = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
+    let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
+
+    let viewer = ViewerInfo {
+        address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
+        viewing_key: provider_vk.to_string(),
+    };
     // query the provider contract
-    let private_metadata_query = QueryProviderMsg::PrivateMetadata { token_id: token_id.to_string(), viewer }; // is it inefficient to convert token_id back to String?
+    let private_metadata_query = QueryProviderMsg::PrivateMetadata { token_id: token_id.to_string(), viewer: Some(viewer) }; // is it inefficient to convert token_id back to String?
     let meta_response: PrivateMetadataResponse = private_metadata_query
-        .query(&deps.querier, provider.hash, provider.address)
-        .unwrap_or_default();
+        .query(&deps.querier, provider.hash, provider.address)?;
 
     let token_uri = meta_response.private_metadata.token_uri;
     let extension = meta_response.private_metadata.extension;
