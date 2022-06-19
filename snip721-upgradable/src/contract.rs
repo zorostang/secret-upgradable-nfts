@@ -486,19 +486,20 @@ pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
         address: address.clone(),
         hash: code_hash.clone(),
     };
-    save(&mut deps.storage, PROVIDER_KEY, &provider)?;
-
-    // create a viewing key that is used to query the provider contract
-    let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
-    let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
     let canonical_address = deps.api.canonical_address(&address)?;
-    let mut key_store = PrefixedStorage::new(PROVIDER_KEY, &mut deps.storage);
-    save(&mut key_store, canonical_address.as_slice(), &key)?; // is it okay to save the key unhashed?
 
     // need to implement some kind of list for multiple providers, like an appendstore
     // will need the ability to iterate over the list of providers,
     // as well as match them to a list of providers if given as input
 
+    let mut provider_store = PrefixedStorage::new(PROVIDER_KEY, &mut deps.storage);
+    save(&mut provider_store, &[1u8], &provider)?;
+
+    // create a viewing key that is used to query the provider contract
+    let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
+    let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
+    let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
+    save(&mut key_store, canonical_address.as_slice(), &key)?; // is it okay to save the key unhashed?
     let key = format!("{}", key);
 
     let set_key_msg = HandleProviderMsg::SetViewingKey { key, padding: None }
@@ -527,29 +528,47 @@ pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
 /// * `new_code_hash` - code hash for the new metadata provider
 pub fn update_metadata_provider<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    _env: Env,
+    env: Env,
     previous_contract: HumanAddr,
     new_contract: HumanAddr,
     previous_code_hash: String,
     new_code_hash: String,
 ) -> HandleResult {
     let previous_provider = Contract {
-        address: previous_contract,
+        address: previous_contract.clone(),
         hash: previous_code_hash,
     };
+    // TODO refactor variable names?
+    let canonical_address_prev = deps.api.canonical_address(&previous_contract)?;
+    let canonical_address_new = deps.api.canonical_address(&new_contract)?;
 
-    if load::<Contract, _>(&deps.storage, PROVIDER_KEY).unwrap() == previous_provider {
-        let new_provider = Contract {
-            address: new_contract.clone(),
-            hash: new_code_hash,
-        };
-        save(&mut deps.storage, PROVIDER_KEY, &new_provider)?;
-    }
-
+    let mut provider_store = PrefixedStorage::new(PROVIDER_KEY, &mut deps.storage);
+    
     // TODO look up index of previous provider and replace the provider at that index
 
+    // TODO change this to a may_load and provide custom error message if it returns None?
+    // if load::<Contract, _>(&provider_store, canonical_address_prev.as_slice()).unwrap() == previous_provider {
+
+    let new_provider = Contract {
+        address: new_contract.clone(),
+        hash: new_code_hash,
+    };
+    save(&mut provider_store, canonical_address_new.as_slice(), &new_provider)?;
+
+    // create a viewing key that is used to query the provider contract
+    let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
+    let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
+    let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
+    save(&mut key_store, canonical_address_new.as_slice(), &key)?; // is it okay to save the key unhashed?
+    let key = format!("{}", key);
+
+    let set_key_msg = HandleProviderMsg::SetViewingKey { key, padding: None }
+        .to_cosmos_msg(new_provider.hash, new_provider.address, None)?;
+
+    // TODO remove the viewing key for the previous contract?
+
     Ok(HandleResponse {
-        messages: vec![],
+        messages: vec![set_key_msg],
         log: vec![log("register_provider", &new_contract)],
         data: Some(to_binary(&HandleAnswer::UpdateMetadataProvider {
             status: Success,
@@ -613,25 +632,25 @@ pub fn mint<S: Storage, A: Api, Q: Querier>(
 
     // send a message to the provider contract to set the metadata for this token
     // new stuff
-    let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
+    // let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
 
-    let set_metadata_msg = HandleProviderMsg::SetMetadata {
-        token_id: token_id.unwrap_or(format!("{}", config.mint_cnt)),
-        idx: config.mint_cnt,
-        public_metadata,
-        private_metadata,
-        padding: None 
-    };
+    // let set_metadata_msg = HandleProviderMsg::SetMetadata {
+    //     token_id: token_id.unwrap_or(format!("{}", config.mint_cnt)),
+    //     idx: config.mint_cnt,
+    //     public_metadata,
+    //     private_metadata,
+    //     padding: None 
+    // };
 
-    let cosmos_msg = set_metadata_msg.to_cosmos_msg(
-        provider.hash,
-        provider.address,
-        None
-    )?;
+    // let cosmos_msg = set_metadata_msg.to_cosmos_msg(
+    //     provider.hash,
+    //     provider.address,
+    //     None
+    // )?;
     // new stuff
 
     Ok(HandleResponse {
-        messages: vec![cosmos_msg],
+        messages: vec![],
         log: vec![log("minted", &minted_str)],
         data: Some(to_binary(&HandleAnswer::MintNft {
             token_id: minted_str,
@@ -814,45 +833,42 @@ pub fn set_metadata<S: Storage, A: Api, Q: Querier>(
         }
     }
 
-    // instead of using these to two if statements,
-    // create a handle message that sends the data to the provider contract
-
-    // if let Some(public) = public_metadata {
-    //     set_metadata_impl(&mut deps.storage, &token, idx, PREFIX_PUB_META, &public)?;
-    // }
-    // if let Some(private) = private_metadata {
-    //     set_metadata_impl(&mut deps.storage, &token, idx, PREFIX_PRIV_META, &private)?;
-    // }
-
-    // do not allow the altering of sealed metadata
-    if !token.unwrapped && private_metadata.is_some() {
-        return Err(StdError::generic_err(
-            "The private metadata of a sealed token can not be modified",
-        ));
+    if let Some(public) = public_metadata {
+        set_metadata_impl(&mut deps.storage, &token, idx, PREFIX_PUB_META, &public)?;
+    }
+    if let Some(private) = private_metadata {
+        set_metadata_impl(&mut deps.storage, &token, idx, PREFIX_PRIV_META, &private)?;
     }
 
-    // TODO
-    // let provider_store = ReadOnlyPrefixedStorage::etc;
-    // let provider = load(&provider_store, provider_addr.as_bytes());
+    // code for if you wanted to set metadata in provider contract from this one
 
-    let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
+    // do not allow the altering of sealed metadata
+    // if !token.unwrapped && private_metadata.is_some() {
+    //     return Err(StdError::generic_err(
+    //         "The private metadata of a sealed token can not be modified",
+    //     ));
+    // }
 
-    let set_metadata_msg = HandleProviderMsg::SetMetadata {
-        token_id: token_id.to_string(),
-        idx,
-        public_metadata,
-        private_metadata,
-        padding: None 
-    };
+    // let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
 
-    let cosmos_msg = set_metadata_msg.to_cosmos_msg(
-        provider.hash,
-        provider.address,
-        None
-    )?;
+    // let set_metadata_msg = HandleProviderMsg::SetMetadata {
+    //     token_id: token_id.to_string(),
+    //     idx,
+    //     public_metadata,
+    //     private_metadata,
+    //     padding: None 
+    // };
+
+    // let cosmos_msg = set_metadata_msg.to_cosmos_msg(
+    //     provider.hash,
+    //     provider.address,
+    //     None
+    // )?;
+
+    // end
 
     Ok(HandleResponse {
-        messages: vec![cosmos_msg],
+        messages: vec![],
         log: vec![],
         data: Some(to_binary(&HandleAnswer::SetMetadata { status: Success })?),
     })
@@ -2318,7 +2334,8 @@ pub fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     if let Some(_idx) = may_idx {
         // load metadata provider contract info
         // refactor this later
-        let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
+        let provider_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
+        let provider: Contract = load(&provider_store, &[1u8])?;
         let canonical_provider_address = deps.api.canonical_address(&provider.address)?;
         let key_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
         let provider_vk: ViewingKey = load(&key_store, canonical_provider_address.as_slice())?;
@@ -2426,6 +2443,7 @@ pub fn query_all_nft_info<S: Storage, A: Api, Q: Querier>(
     let (owner, approvals, idx) =
         process_cw721_owner_of(deps, token_id, viewer, include_expired, from_permit)?;
     let meta_store = ReadonlyPrefixedStorage::new(PREFIX_PUB_META, &deps.storage);
+    // TODO replace with query to provider contract
     let info: Option<Metadata> = may_load(&meta_store, &idx.to_le_bytes())?;
     let access = Cw721OwnerOfResponse { owner, approvals };
     to_binary(&QueryAnswer::AllNftInfo { access, info })
@@ -5075,6 +5093,7 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
         };
         // get the public metadata
         let token_key = idx.to_le_bytes();
+        // TODO query the provider contract instead
         let public_metadata: Option<Metadata> = may_load(&pub_store, &token_key)?;
         // get the private metadata if it is not sealed and if the viewer is permitted
         let mut display_private_metadata_error = None;
@@ -5099,6 +5118,7 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
             ));
             None
         } else {
+            // TODO query the provider contract instead
             let priv_meta: Option<Metadata> = may_load(&priv_store, &token_key)?;
             priv_meta
         };

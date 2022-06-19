@@ -24,8 +24,6 @@ pub enum HandleMsg {
     SetMetadata {
         /// id of the token whose metadata should be updated
         token_id: String,
-        /// token index
-        idx: u32,
         /// the optional new public metadata
         public_metadata: Option<Metadata>,
         /// the optional new private metadata

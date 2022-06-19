@@ -51,7 +51,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     let response = match msg {
         HandleMsg::SetMetadata {
             token_id,
-            idx,
             public_metadata,
             private_metadata,
             ..
@@ -60,7 +59,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             env,
             &config,
             &token_id,
-            idx,
             public_metadata,
             private_metadata,
         ),
@@ -77,16 +75,15 @@ pub fn handle_set_metadata<S: Storage, A: Api, Q: Querier>(
     env: Env,
     config: &Config,
     token_id: &str,
-    idx: u32,
     public_metadata: Option<Metadata>,
     private_metadata: Option<Metadata>,
 ) -> HandleResult {
 
     if let Some(public) = public_metadata {
-        set_metadata_impl(&mut deps.storage, idx, PREFIX_PUB_META, &public)?;
+        set_metadata_impl(&mut deps.storage, token_id, PREFIX_PUB_META, &public)?;
     }
     if let Some(private) = private_metadata {
-        set_metadata_impl(&mut deps.storage, idx, PREFIX_PRIV_META, &private)?;
+        set_metadata_impl(&mut deps.storage, token_id, PREFIX_PRIV_META, &private)?;
     }
     
     Ok(HandleResponse {
@@ -110,13 +107,13 @@ pub fn handle_set_metadata<S: Storage, A: Api, Q: Querier>(
 #[allow(clippy::too_many_arguments)]
 fn set_metadata_impl<S: Storage>(
     storage: &mut S,
-    idx: u32,
+    token_id: &str,
     prefix: &[u8],
     metadata: &Metadata,
 ) -> StdResult<()> {
     enforce_metadata_field_exclusion(metadata)?;
     let mut meta_store = PrefixedStorage::new(prefix, storage);
-    save(&mut meta_store, &idx.to_le_bytes(), metadata)?;
+    save(&mut meta_store, &token_id.as_bytes(), metadata)?;
     Ok(())
 }
 
@@ -139,10 +136,13 @@ fn enforce_metadata_field_exclusion(metadata: &Metadata) -> StdResult<()> {
 pub fn handle_set_key<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    config: &Config,
+    _config: &Config,
     key: String,
 ) -> HandleResult {
-    save(&mut deps.storage, PREFIX_VIEW_KEY, &ViewingKey(key.clone()).to_hashed())?;
+    let vk = ViewingKey(key.clone());
+    let message_sender = deps.api.canonical_address(&env.message.sender)?;
+    let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
+    save(&mut key_store, message_sender.as_slice(), &vk.to_hashed())?;
 
     Ok(HandleResponse {
         messages: vec![],
@@ -178,8 +178,8 @@ pub fn handle_change_admin<S: Storage, A: Api, Q: Querier>(
 
 pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
     let response = match msg {
-        QueryMsg::NftInfo { token_id, viewer } => query_nft_info(deps, &token_id, &viewer),
-        QueryMsg::PrivateMetadata { token_id, viewer } => query_private_metadata(deps, &token_id, &viewer),
+        QueryMsg::NftInfo { token_id, viewer } => query_nft_info(deps, &token_id, viewer),
+        QueryMsg::PrivateMetadata { token_id, viewer } => query_private_metadata(deps, &token_id, viewer),
     };
     pad_query_result(response, BLOCK_SIZE)
 }
@@ -187,8 +187,12 @@ pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryM
 fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     token_id: &str,
-    viewer: &Option<ViewerInfo>,
+    viewer: Option<ViewerInfo>,
 ) -> QueryResult {
+    // check viewing key 
+    let _viewer_raw = get_querier(deps, viewer)?;
+
+    // load public metadata
     let meta_store = ReadonlyPrefixedStorage::new(PREFIX_PUB_META, &deps.storage);
     let meta: Metadata = may_load(&meta_store, &token_id.as_bytes())?.unwrap_or_default();
 
@@ -201,8 +205,12 @@ fn query_nft_info<S: Storage, A: Api, Q: Querier>(
 fn query_private_metadata<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     token_id: &str,
-    viewer: &Option<ViewerInfo>,
+    viewer: Option<ViewerInfo>,
 ) -> QueryResult {
+    // check viewing key 
+    let _viewer_raw = get_querier(deps, viewer)?;
+
+    // load private metadata
     let meta_store = ReadonlyPrefixedStorage::new(PREFIX_PRIV_META, &deps.storage);
     let meta: Metadata = may_load(&meta_store, &token_id.as_bytes())?.unwrap_or_default();
 
@@ -236,4 +244,26 @@ fn check_key<S: ReadonlyStorage>(
     Err(StdError::generic_err(
         "Wrong viewing key for this address or viewing key not set",
     ))
+}
+
+/// Returns StdResult<Option<CanonicalAddr>> from determining the querying address (if possible) either
+/// from a permit validation or a ViewerInfo
+///
+/// # Arguments
+///
+/// * `deps` - a reference to Extern containing all the contract's external dependencies
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `from_permit` - the address derived from an Owner permit, if applicable
+fn get_querier<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    viewer: Option<ViewerInfo>,
+) -> StdResult<Option<CanonicalAddr>> {
+    let viewer_raw = viewer
+        .map(|v| {
+            let raw = deps.api.canonical_address(&v.address)?;
+            check_key(&deps.storage, &raw, v.viewing_key)?;
+            Ok(raw)
+        })
+        .transpose()?;
+    Ok(viewer_raw)
 }

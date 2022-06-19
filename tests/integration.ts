@@ -218,8 +218,6 @@ async function mint(
         mint_nft: {
           token_id: "001",
           owner: client.address,
-          public_metadata: { extension: {} },
-          private_metadata: { extension: {} },
         },
       },
       sentFunds: [],
@@ -236,14 +234,15 @@ async function mint(
 
 async function setMetadata(
   client: SecretNetworkClient,
-  nftContractHash: string,
-  nftContractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string,
 ) {
+  console.log(`contract address used to set metadata: ${providerContractAddress}`)
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
-      contractAddress: nftContractAddress,
-      codeHash: nftContractHash,
+      contractAddress: providerContractAddress,
+      codeHash: providerContractHash,
       msg: {
         set_metadata: {
           token_id: "001",
@@ -407,7 +406,12 @@ async function queryPrivateMetadata(
     }
   })) as Metadata;
 
-  console.log(JSON.stringify(response,null,2));
+  if ('err"' in response) {
+    throw new Error(
+      `Query failed with the following err: ${JSON.stringify(response)}`
+    );
+  } else { console.log(JSON.stringify(response,null,2)); }
+
 }
 
 async function queryCount(
@@ -465,11 +469,13 @@ async function test_set_metadata(
   client: SecretNetworkClient,
   nftContractHash: string,
   nftContractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string,
 ) {
   await setMetadata(
     client,
-    nftContractHash,
-    nftContractAddress,
+    providerContractHash,
+    providerContractAddress,
   );
 }
 
@@ -532,7 +538,7 @@ async function runTestFunction(
     console.log(`provider contract: ${providerContractAddress}`);
 
   await runTestFunction(
-    test_mint,
+    test_set_metadata,
     client,
     nftContractHash,
     nftContractAddress,
@@ -548,7 +554,7 @@ async function runTestFunction(
     providerContractAddress
   );
   await runTestFunction(
-    test_set_metadata,
+    test_mint,
     client,
     nftContractHash,
     nftContractAddress,
