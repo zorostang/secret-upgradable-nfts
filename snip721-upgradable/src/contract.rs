@@ -2331,34 +2331,15 @@ pub fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     let may_idx: Option<u32> = may_load(&map2idx, token_id.as_bytes())?;
     // if token id was found
     if let Some(_idx) = may_idx {
-        // load metadata provider contract info
-        // refactor this later
-        let provider_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
-        let provider: Contract = load(&provider_store, &[1u8])?;
-        // load this contract address
-        let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;
-        let my_address: HumanAddr = deps.api.human_address(&my_address)?;
-        // load viewing key for given provider address
-        let provider_address: CanonicalAddr = deps.api.canonical_address(&provider.address)?;
-        let key_store = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
-        let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
-
-        let viewer = ViewerInfo {
-            address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
-            viewing_key: provider_vk.to_string(),
-        };
-
+        let (provider, viewer) = prep_provider_info(deps)?;
         // query the provider contract
         let nft_info_query = QueryProviderMsg::NftInfo { token_id, viewer: Some(viewer) };
         let meta_response: NftInfoResponse = nft_info_query
             .query(&deps.querier, provider.hash, provider.address)?;
 
-        let token_uri = meta_response.nft_info.token_uri;
-        let extension = meta_response.nft_info.extension;
-
         return to_binary(&QueryAnswer::NftInfo {
-            token_uri,
-            extension,
+            token_uri: meta_response.nft_info.token_uri,
+            extension: meta_response.nft_info.extension,
         });
     }
     let config: Config = load(&deps.storage, CONFIG_KEY)?;
@@ -2410,33 +2391,15 @@ pub fn query_private_meta<S: Storage, A: Api, Q: Querier>(
             "Sealed metadata must be unwrapped by calling Reveal before it can be viewed",
         ));
     }
-    // load metadata provider contract info
-    // refactor this later
-    let provider_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
-    let provider: Contract = load(&provider_store, &[1u8])?;
-    // load this contract address
-    let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;
-    let my_address: HumanAddr = deps.api.human_address(&my_address)?;
-    // load viewing key for given provider address
-    let provider_address: CanonicalAddr = deps.api.canonical_address(&provider.address)?;
-    let key_store = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
-    let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
-
-    let viewer = ViewerInfo {
-        address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
-        viewing_key: provider_vk.to_string(),
-    };
+    let (provider, viewer) = prep_provider_info(deps)?;
     // query the provider contract
     let private_metadata_query = QueryProviderMsg::PrivateMetadata { token_id: token_id.to_string(), viewer: Some(viewer) }; // is it inefficient to convert token_id back to String?
     let meta_response: PrivateMetadataResponse = private_metadata_query
         .query(&deps.querier, provider.hash, provider.address)?;
 
-    let token_uri = meta_response.private_metadata.token_uri;
-    let extension = meta_response.private_metadata.extension;
-
     to_binary(&QueryAnswer::PrivateMetadata {
-        token_uri,
-        extension,
+        token_uri: meta_response.private_metadata.token_uri,
+        extension: meta_response.private_metadata.extension,
     })
 }
 
@@ -2456,11 +2419,32 @@ pub fn query_all_nft_info<S: Storage, A: Api, Q: Querier>(
     include_expired: Option<bool>,
     from_permit: Option<CanonicalAddr>,
 ) -> QueryResult {
-    let (owner, approvals, idx) =
+    let (owner, approvals, _idx) =
         process_cw721_owner_of(deps, token_id, viewer, include_expired, from_permit)?;
-    let meta_store = ReadonlyPrefixedStorage::new(PREFIX_PUB_META, &deps.storage);
-    // TODO replace with query to provider contract
-    let info: Option<Metadata> = may_load(&meta_store, &idx.to_le_bytes())?;
+
+    // load metadata provider contract info
+    // refactor this later
+    let provider_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
+    let provider: Contract = load(&provider_store, &[1u8])?;
+    // load this contract address
+    let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;
+    let my_address: HumanAddr = deps.api.human_address(&my_address)?;
+    // load viewing key for given provider address
+    let provider_address: CanonicalAddr = deps.api.canonical_address(&provider.address)?;
+    let key_store = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
+    let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
+
+    let viewer = ViewerInfo {
+        address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
+        viewing_key: provider_vk.to_string(),
+    };
+
+    // query the provider contract
+    let nft_info_query = QueryProviderMsg::NftInfo { token_id: token_id.to_string(), viewer: Some(viewer) };
+    let meta_response: NftInfoResponse = nft_info_query
+        .query(&deps.querier, provider.hash, provider.address)?;
+
+    let info = Some(meta_response.nft_info);
     let access = Cw721OwnerOfResponse { owner, approvals };
     to_binary(&QueryAnswer::AllNftInfo { access, info })
 }
@@ -4823,7 +4807,6 @@ fn mint_list<S: Storage, A: Api, Q: Querier>(
         let mut map2id = PrefixedStorage::new(PREFIX_MAP_TO_ID, &mut deps.storage);
         save(&mut map2id, &token_key, &id)?;
 
-        // TODO decide if removing this save metadata part from this contract
         //
         // If you wanted to store an additional data struct for each NFT, you would create
         // a new prefix and store with the `token_key` like below
@@ -5046,8 +5029,6 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
     let mut dossiers: Vec<BatchNftDossierElement> = Vec::new();
     // set up all the immutable storage references
     let own_priv_store = ReadonlyPrefixedStorage::new(PREFIX_OWNER_PRIV, &deps.storage);
-    let pub_store = ReadonlyPrefixedStorage::new(PREFIX_PUB_META, &deps.storage);
-    let priv_store = ReadonlyPrefixedStorage::new(PREFIX_PRIV_META, &deps.storage);
     let roy_store = ReadonlyPrefixedStorage::new(PREFIX_ROYALTY_INFO, &deps.storage);
     let run_store = ReadonlyPrefixedStorage::new(PREFIX_MINT_RUN, &deps.storage);
     let all_store = ReadonlyPrefixedStorage::new(PREFIX_ALL_PERMISSIONS, &deps.storage);
@@ -5109,8 +5090,15 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
         };
         // get the public metadata
         let token_key = idx.to_le_bytes();
-        // TODO query the provider contract instead
-        let public_metadata: Option<Metadata> = may_load(&pub_store, &token_key)?;
+
+        let (provider, viewer) = prep_provider_info(deps)?;
+        // query the provider contract
+        let nft_info_query = QueryProviderMsg::NftInfo { token_id: id.clone(), viewer: Some(viewer) };
+        let meta_response: NftInfoResponse = nft_info_query
+            .query(&deps.querier, provider.hash, provider.address)?;
+        let public_metadata: Option<Metadata> = Some(meta_response.nft_info);
+
+
         // get the private metadata if it is not sealed and if the viewer is permitted
         let mut display_private_metadata_error = None;
         let private_metadata = if let Err(err) = check_perm_core(
@@ -5134,8 +5122,12 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
             ));
             None
         } else {
-            // TODO query the provider contract instead
-            let priv_meta: Option<Metadata> = may_load(&priv_store, &token_key)?;
+            let (provider, viewer) = prep_provider_info(deps)?;
+            // query the provider contract
+            let private_metadata_query = QueryProviderMsg::PrivateMetadata { token_id: id.clone(), viewer: Some(viewer) };
+            let meta_response: PrivateMetadataResponse = private_metadata_query
+                .query(&deps.querier, provider.hash, provider.address)?;
+            let priv_meta: Option<Metadata> = Some(meta_response.private_metadata);
             priv_meta
         };
         // get the royalty information if present
@@ -5218,4 +5210,26 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
         });
     }
     Ok(dossiers)
+}
+
+fn prep_provider_info<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+) -> StdResult<(Contract,ViewerInfo)> {
+    // load metadata provider contract info
+    // refactor this later
+    let provider_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
+    let provider: Contract = load(&provider_store, &[1u8])?;
+    // load this contract address
+    let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;
+    let my_address: HumanAddr = deps.api.human_address(&my_address)?;
+    // load viewing key for given provider address
+    let provider_address: CanonicalAddr = deps.api.canonical_address(&provider.address)?;
+    let key_store = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
+    let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
+    // create viewing key authorization for this contract
+    let viewer = ViewerInfo {
+        address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
+        viewing_key: provider_vk.to_string(),
+    };
+    Ok((provider, viewer))
 }

@@ -176,6 +176,7 @@ async function registerProvider(
   providerContractHash: string,
   providerContractAddress: string,
 ) {
+  console.log(`interacting with snip721 contract: ${contractAddress}`);
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
@@ -209,6 +210,7 @@ async function mint(
   contractHash: string,
   contractAddress: string,
 ) {
+  console.log(`interacting with snip721 contract: ${contractAddress}`);
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
@@ -237,7 +239,7 @@ async function setMetadata(
   providerContractHash: string,
   providerContractAddress: string,
 ) {
-  console.log(`contract address used to set metadata: ${providerContractAddress}`)
+  console.log(`interacting with provider contract: ${providerContractAddress}`);
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
@@ -255,7 +257,7 @@ async function setMetadata(
           private_metadata: {
             extension: {
               name: "private name",
-              description: "hello world, but private",
+              description: "hello private world",
             }
           },
         }
@@ -277,6 +279,7 @@ async function setViewingKey(
   nftContractHash: string,
   nftContractAddress: string,
 ) {
+  console.log(`interacting with snip721 contract: ${nftContractAddress}`);
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
@@ -493,6 +496,13 @@ async function test_query_metadata(
     providerContractHash,
     providerContractAddress
   );
+  await queryPrivateMetadata(
+    client,
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
+  );
   await setViewingKey(
     client,
     nftContractHash,
@@ -569,5 +579,4 @@ async function runTestFunction(
     providerContractHash,
     providerContractAddress
   );
-  await runTestFunction(test_gas_limits, client, nftContractHash, nftContractAddress, providerContractHash, providerContractAddress);
 })();
