@@ -23,7 +23,8 @@ backtraces = ["cosmwasm-std/backtraces"]
 [dependencies]
 cosmwasm-std = { version = "0.10", package = "secret-cosmwasm-std" }
 cosmwasm-storage = { version = "0.10", package = "secret-cosmwasm-storage" }
-secret-toolkit = { version = "0.3", default-features = false, features = ["storage", "serialization", "utils", "permit", "snip721"] }
+secret-toolkit = { version = "0.3", default-features = false, features = ["incubator", "storage", "serialization", "utils", "permit", "snip721"] }
+secret-toolkit-incubator = { features = ["cashmap"]}
 serde-json-wasm = "0.2.1"
 schemars = "0.7"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }

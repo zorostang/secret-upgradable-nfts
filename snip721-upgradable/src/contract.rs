@@ -10,6 +10,7 @@ use primitive_types::U256;
 use std::collections::HashSet;
 
 use secret_toolkit::{
+    incubator::{CashMap, ReadOnlyCashMap},
     permit::{validate, Permit, RevokedPermits},
     utils::{pad_handle_result, pad_query_result, types::Contract, Query, HandleCallback},
 };
@@ -482,25 +483,31 @@ pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
     address: HumanAddr,
     code_hash: String,
 ) -> HandleResult {
+    // prepare contract address for use as key
+    let canonical_address = deps.api.canonical_address(&address)?;
+    // create provider info struct for use in hashmap
     let provider = Contract {
         address: address.clone(),
         hash: code_hash.clone(),
     };
-    let canonical_address = deps.api.canonical_address(&address)?;
 
-    // need to implement some kind of list for multiple providers, like an appendstore
-    // will need the ability to iterate over the list of providers,
-    // as well as match them to a list of providers if given as input
+    // TODO remove this once I know the cashmap is working
+    // let mut provider_store = PrefixedStorage::new(PROVIDER_KEY, &mut deps.storage);
+    // save(&mut provider_store, &[1u8], &provider)?;
 
-    let mut provider_store = PrefixedStorage::new(PROVIDER_KEY, &mut deps.storage);
-    save(&mut provider_store, &[1u8], &provider)?;
+    // initialize and store new provider in hashmap
+    let mut providers_cash_map: CashMap<Contract, _> = CashMap::init(PROVIDER_KEY, &mut deps.storage);
+    providers_cash_map.insert(canonical_address.as_slice(), provider.clone())?;
 
-    // create a viewing key that is used to query the provider contract
+
+    // create a viewing key required to query the provider contract
+    // TODO extract create viewing key function
     let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
     let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
     let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
-    save(&mut key_store, canonical_address.as_slice(), &key)?; // is it okay to save the key unhashed?
+    save(&mut key_store, canonical_address.as_slice(), &key)?;
 
+    // contruct a callback message to the provider contract to set the viewing key there
     let set_key_msg = HandleProviderMsg::SetViewingKey { key: key.to_string(), padding: None }
         .to_cosmos_msg(provider.hash, provider.address, None)?;
 
@@ -533,46 +540,49 @@ pub fn update_metadata_provider<S: Storage, A: Api, Q: Querier>(
     previous_code_hash: String,
     new_code_hash: String,
 ) -> HandleResult {
+    // need to load this first due to mutable and immutable reference rules (used to create vk)
+    let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
+    // initialize registered providers hashmap
+    let mut providers_cash_map: CashMap<Contract, _> = CashMap::init(PROVIDER_KEY, &mut deps.storage);
+    // prepare contract addresses for use as keys
+    let previous_address = deps.api.canonical_address(&previous_contract)?;
+    let new_address = deps.api.canonical_address(&new_contract)?;
+    // create provider info structs for use in hashmap
     let previous_provider = Contract {
         address: previous_contract.clone(),
         hash: previous_code_hash,
     };
-    // TODO refactor variable names?
-    let canonical_address_prev = deps.api.canonical_address(&previous_contract)?;
-    let canonical_address_new = deps.api.canonical_address(&new_contract)?;
-
-    let mut provider_store = PrefixedStorage::new(PROVIDER_KEY, &mut deps.storage);
-    
-    // TODO look up index of previous provider and replace the provider at that index
-
-    // TODO change this to a may_load and provide custom error message if it returns None?
-    // if load::<Contract, _>(&provider_store, canonical_address_prev.as_slice()).unwrap() == previous_provider {
-
     let new_provider = Contract {
         address: new_contract.clone(),
         hash: new_code_hash,
     };
-    save(&mut provider_store, canonical_address_new.as_slice(), &new_provider)?;
+    // check if provided previous contract info matches stored info
+    if providers_cash_map.get(previous_address.as_slice()) == Some(previous_provider) {
+        // save new provider info in hashmap
+        providers_cash_map.insert(new_address.as_slice(), new_provider.clone())?;
+        // remove previous provider
+        providers_cash_map.remove(previous_address.as_slice())?;
+        // initialize viewing key prefixed storage
+        let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
+        // create a viewing key required to query the provider contract
+        let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
+        save(&mut key_store, new_address.as_slice(), &key)?;
+        // contruct a callback message to the provider contract to set the viewing key there
+        let set_key_msg = HandleProviderMsg::SetViewingKey { key: key.to_string(), padding: None }
+            .to_cosmos_msg(new_provider.hash, new_provider.address, None)?;
+        // remove previous provider viewing key
+        remove(&mut key_store, previous_address.as_slice());   
 
-    // create a viewing key that is used to query the provider contract
-    let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
-    let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
-    let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
-    save(&mut key_store, canonical_address_new.as_slice(), &key)?; // is it okay to save the key unhashed?
-    let key = format!("{}", key);
-
-    let set_key_msg = HandleProviderMsg::SetViewingKey { key, padding: None }
-        .to_cosmos_msg(new_provider.hash, new_provider.address, None)?;
-
-    // TODO remove the viewing key for the previous contract?
-
-    Ok(HandleResponse {
-        messages: vec![set_key_msg],
-        log: vec![log("register_provider", &new_contract)],
-        data: Some(to_binary(&HandleAnswer::UpdateMetadataProvider {
-            status: Success,
-        })?),
-    })
+        return Ok(HandleResponse {
+            messages: vec![set_key_msg],
+            log: vec![log("register_provider", &new_contract)],
+            data: Some(to_binary(&HandleAnswer::UpdateMetadataProvider {
+                status: Success,
+            })?)
+        })
+    } else {
+        Err(StdError::generic_err("Invalid previous contract information"))
+    }
 }
 
 /// Returns HandleResult
@@ -628,25 +638,6 @@ pub fn mint<S: Storage, A: Api, Q: Querier>(
     }];
     let mut minted = mint_list(deps, &env, config, &sender_raw, mints)?;
     let minted_str = minted.pop().unwrap_or_default();
-
-    // send a message to the provider contract to set the metadata for this token
-    // new stuff
-    // let provider: Contract = load(&deps.storage, PROVIDER_KEY)?;
-
-    // let set_metadata_msg = HandleProviderMsg::SetMetadata {
-    //     token_id: token_id.unwrap_or(format!("{}", config.mint_cnt)),
-    //     idx: config.mint_cnt,
-    //     public_metadata,
-    //     private_metadata,
-    //     padding: None 
-    // };
-
-    // let cosmos_msg = set_metadata_msg.to_cosmos_msg(
-    //     provider.hash,
-    //     provider.address,
-    //     None
-    // )?;
-    // new stuff
 
     Ok(HandleResponse {
         messages: vec![],
@@ -1915,6 +1906,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryM
             include_expired,
         } => query_owner_of(deps, &token_id, viewer, include_expired, None),
         QueryMsg::NftInfo { token_id } => query_nft_info(deps, token_id),
+        QueryMsg::BatchNftInfo { token_id, provider_list } => batch_query_nft_info(deps, token_id, provider_list),
         QueryMsg::PrivateMetadata { token_id, viewer } => {
             query_private_meta(deps, &token_id, viewer, None)
         }
@@ -2340,6 +2332,53 @@ pub fn query_nft_info<S: Storage, A: Api, Q: Querier>(
         return to_binary(&QueryAnswer::NftInfo {
             token_uri: meta_response.nft_info.token_uri,
             extension: meta_response.nft_info.extension,
+        });
+    }
+    let config: Config = load(&deps.storage, CONFIG_KEY)?;
+    // token id wasn't found
+    // if the token supply is public, let them know the token does not exist
+    if config.token_supply_is_public {
+        return Err(StdError::generic_err(format!(
+            "Token ID: {} not found",
+            token_id
+        )));
+    }
+    // otherwise, just return empty metadata
+    to_binary(&QueryAnswer::NftInfo {
+        token_uri: None,
+        extension: None,
+    })
+}
+
+/// Returns QueryResult displaying the public metadata of a token.
+/// 
+/// Returns data from all registered providers or an optional list of providers
+///
+/// # Arguments
+///
+/// * `storage` - a reference to the contract's storage
+/// * `token_id` - string slice of the token id
+/// * `provider_list` - an optional list of provider addresses to query
+pub fn batch_query_nft_info<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    token_id: String,
+    provider_list: Option<Vec<HumanAddr>>,
+) -> QueryResult {
+    let map2idx = ReadonlyPrefixedStorage::new(PREFIX_MAP_TO_INDEX, &deps.storage);
+    let may_idx: Option<u32> = may_load(&map2idx, token_id.as_bytes())?;
+    // if token id was found
+    if let Some(_idx) = may_idx {
+        let provider_list = provider_list.unwrap_or_else(|| get_all_providers(&deps.storage));
+        let mut metadata = Vec::<Metadata>::new();
+        for provider in provider_list {
+            let (provider, viewer) = prep_provider_info_beta(deps, provider)?;
+            let nft_info_query = QueryProviderMsg::NftInfo { token_id: token_id.clone(), viewer: Some(viewer) };
+            let meta_response: NftInfoResponse = nft_info_query
+                .query(&deps.querier, provider.hash, provider.address)?;
+            metadata.push(meta_response.nft_info)
+        }
+        return to_binary(&QueryAnswer::BatchNftInfo {
+            metadata: Some(metadata),
         });
     }
     let config: Config = load(&deps.storage, CONFIG_KEY)?;
@@ -5216,9 +5255,11 @@ fn prep_provider_info<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
 ) -> StdResult<(Contract,ViewerInfo)> {
     // load metadata provider contract info
-    // refactor this later
-    let provider_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
-    let provider: Contract = load(&provider_store, &[1u8])?;
+    let providers_cash_map: ReadOnlyCashMap<Contract, _> = ReadOnlyCashMap::init(PROVIDER_KEY, &deps.storage);
+    
+    // using this for testing purposes (there is only one registered provider)
+    let provider: Contract = providers_cash_map.iter().next().unwrap();
+
     // load this contract address
     let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;
     let my_address: HumanAddr = deps.api.human_address(&my_address)?;
@@ -5232,4 +5273,37 @@ fn prep_provider_info<S: Storage, A: Api, Q: Querier>(
         viewing_key: provider_vk.to_string(),
     };
     Ok((provider, viewer))
+}
+
+fn prep_provider_info_beta<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+) -> StdResult<(Contract,ViewerInfo)> {
+    // load metadata provider contract info
+    let providers_cash_map: ReadOnlyCashMap<Contract, _> = ReadOnlyCashMap::init(PROVIDER_KEY, &deps.storage);
+    let key = deps.api.canonical_address(&address)?;
+    let provider: Contract = providers_cash_map.get(key.as_slice()).unwrap();
+    // load this contract address
+    let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;
+    let my_address: HumanAddr = deps.api.human_address(&my_address)?;
+    // load viewing key for given provider address
+    let provider_address: CanonicalAddr = deps.api.canonical_address(&provider.address)?;
+    let key_store = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
+    let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
+    // create viewing key authorization for this contract
+    let viewer = ViewerInfo {
+        address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
+        viewing_key: provider_vk.to_string(),
+    };
+    Ok((provider, viewer))
+}
+
+fn get_all_providers<S: Storage>(storage: &S) -> Vec<HumanAddr> {
+    let providers_cash_map: ReadOnlyCashMap<Contract, _> = ReadOnlyCashMap::init(PROVIDER_KEY, storage);
+    let all_providers: Vec<HumanAddr> = providers_cash_map
+        .iter()
+        .map(|x| x.address)
+        .collect();
+
+    all_providers
 }

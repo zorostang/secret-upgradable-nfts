@@ -727,6 +727,8 @@ pub enum QueryMsg {
     },
     /// displays the public metadata of a token
     NftInfo { token_id: String },
+    /// displays the public metadata of a token from multiple providers
+    BatchNftInfo { token_id: String, provider_list: Option<Vec<HumanAddr>> },
     /// displays all the information contained in the OwnerOf and NftInfo queries
     AllNftInfo {
         token_id: String,
@@ -974,6 +976,9 @@ pub enum QueryAnswer {
     NftInfo {
         token_uri: Option<String>,
         extension: Option<Extension>,
+    },
+    BatchNftInfo {
+        metadata: Option<Vec<Metadata>>,
     },
     PrivateMetadata {
         token_uri: Option<String>,

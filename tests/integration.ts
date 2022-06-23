@@ -517,6 +517,21 @@ async function test_query_metadata(
   );
 }
 
+async function testBatchQuery(
+  client: SecretNetworkClient,
+  nftContractHash: string,
+  nftContractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string,
+) {
+  await initializeAndUploadMoreProviderContracts();
+  await setMetadata(
+    client,
+    providerContractHash,
+    providerContractAddress,
+  );
+}
+
 async function test_gas_limits() {
   // There is no accurate way to measure gas limits but it is actually very recommended to make sure that the gas that is used by a specific tx makes sense
 }
