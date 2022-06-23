@@ -3,6 +3,37 @@ import { Wallet, SecretNetworkClient, fromUtf8 } from "secretjs";
 import fs from "fs";
 import assert from "assert";
 
+interface Trait {
+  display_type?: string;
+  trait_type?: string;
+  value: string;
+  max_value?: string;
+}
+interface Authentication {
+  key?: string;
+  user?: string;
+}
+interface MediaFile {
+  file_type?: string;
+  extension?: string;
+  authentication?: Authentication;
+  url: string;
+}
+interface Extension {
+  image?: string;
+  image_data?: string;
+  external_url?: string;
+  description?: string;
+  name?: string;
+  attributes?: Trait[];
+  media?: MediaFile[];
+  protected_attributes: string[];
+}
+interface Metadata {
+  token_uri?: string;
+  extension?: Extension;
+}
+
 // Returns a client with which we can interact with secret network
 const initializeClient = async (endpoint: string, chainId: string) => {
   const wallet = new Wallet(); // Use default constructor of wallet to generate random mnemonic.
@@ -26,7 +57,7 @@ const initializeContract = async (
   initMsg: object,
 ) => {
   const wasmCode = fs.readFileSync(contractPath);
-  console.log("Uploading contract");
+  console.log("\x1b[1mUploading contract\x1b[0m");
 
   const uploadReceipt = await client.tx.compute.storeCode(
     {
@@ -57,7 +88,7 @@ const initializeContract = async (
   console.log("Contract codeId: ", codeId);
 
   const contractCodeHash = await client.query.compute.codeHash(codeId);
-  console.log(`Contract hash: ${contractCodeHash}`);
+  console.log(`Contract hash: \x1b[32m${contractCodeHash}\x1b[0m`);
 
   const contract = await client.tx.compute.instantiateContract(
     {
@@ -82,7 +113,7 @@ const initializeContract = async (
     (log) => log.type === "message" && log.key === "contract_address"
   )!.value;
 
-  console.log(`Contract address: ${contractAddress}`);
+  console.log(`Contract address: \x1b[32m${contractAddress}\x1b[0m\n`);
 
   var contractInfo: [string, string] = [contractCodeHash, contractAddress];
   return contractInfo;
@@ -109,7 +140,7 @@ async function fillUpFromFaucet(
     try {
       await getFromFaucet(client.address);
     } catch (e) {
-      console.error(`failed to get tokens from faucet: ${e}`);
+      console.error(`\x1b[2mfailed to get tokens from faucet: ${e}\x1b[0m`);
     }
     balance = await getScrtBalance(client);
   }
@@ -194,7 +225,7 @@ async function registerProvider(
   providerContractHash: string,
   providerContractAddress: string,
 ) {
-  console.log(`interacting with snip721 contract: ${contractAddress}`);
+  console.log(`Interacting with snip721 contract: ${contractAddress}`);
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
@@ -219,7 +250,7 @@ async function registerProvider(
   let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
   console.log(parsedTransactionData);
   
-  console.log(`Register Provider used ${tx.gasUsed} gas`);
+  console.log(`Register Provider used \x1b[33m${tx.gasUsed}\x1b[0m gas`);
   }
 
 async function updateProvider(
@@ -229,7 +260,7 @@ async function updateProvider(
   providerContractHash: string,
   providerContractAddress: string,
 ) {
-  console.log(`interacting with snip721 contract: ${contractAddress}`);
+  console.log(`Interacting with snip721 contract: ${contractAddress}`);
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
@@ -251,12 +282,12 @@ async function updateProvider(
   );
 
   let txLog = tx.arrayLog!.find((log) => log.key === "register_provider")!.value;
-  console.log(`Registered Provider address is: ${txLog}`);
+  console.log(`Updated Provider address is: ${txLog}`);
 
   let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
   console.log(parsedTransactionData);
 
-  console.log(`Register Provider used ${tx.gasUsed} gas`);
+  console.log(`Update Provider used \x1b[33m${tx.gasUsed}\x1b[0m gas`);
   }
 
 async function mint(
@@ -264,7 +295,7 @@ async function mint(
   contractHash: string,
   contractAddress: string,
 ) {
-  console.log(`interacting with snip721 contract: ${contractAddress}`);
+  console.log(`Interacting with snip721 contract: ${contractAddress}`);
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
@@ -285,7 +316,7 @@ async function mint(
 
   let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
   console.log(parsedTransactionData);
-  console.log(`Mint used ${tx.gasUsed} gas`);
+  console.log(`Mint used \x1b[33m${tx.gasUsed}\x1b[0m gas`);
 }
 
 async function setMetadata(
@@ -293,7 +324,7 @@ async function setMetadata(
   providerContractHash: string,
   providerContractAddress: string,
 ) {
-  console.log(`interacting with provider contract: ${providerContractAddress}`);
+  console.log(`Interacting with metadata_provider contract: ${providerContractAddress}`);
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
@@ -304,13 +335,13 @@ async function setMetadata(
           token_id: "001",
           public_metadata: {
             extension: {
-              name: "test name",
+              name: "public name " + Math.ceil(Math.random() * 1000),
               description: "hello world",
             }
           },
           private_metadata: {
             extension: {
-              name: "private name",
+              name: "private name " + Math.ceil(Math.random() * 1000),
               description: "hello private world",
             }
           },
@@ -325,7 +356,7 @@ async function setMetadata(
   
   let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
   console.log(parsedTransactionData);
-  console.log(`Set Metadata ${tx.gasUsed} gas`);
+  console.log(`Set Metadata used \x1b[33m${tx.gasUsed}\x1b[0m gas`);
 }
 
 async function setViewingKey(
@@ -333,7 +364,7 @@ async function setViewingKey(
   nftContractHash: string,
   nftContractAddress: string,
 ) {
-  console.log(`interacting with snip721 contract: ${nftContractAddress}`);
+  console.log(`Interacting with snip721 contract: ${nftContractAddress}`);
   const tx = await client.tx.compute.executeContract(
     {
       sender: client.address,
@@ -351,7 +382,7 @@ async function setViewingKey(
 
   let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
   console.log(parsedTransactionData);
-  console.log(`Set Viewing Key used ${tx.gasUsed} gas`);
+  console.log(`Set Viewing Key used \x1b[33m${tx.gasUsed}\x1b[0m gas`);
 }
 
 async function queryNftInfo(
@@ -361,47 +392,28 @@ async function queryNftInfo(
   providerContractHash: string,
   providerContractAddress: string,
 ) {
-  interface ViewerInfo {
-    address: string;
-    viewing_key: string;
-  }
-
-  interface Trait {
-    display_type?: string;
-    trait_type?: string;
-    value: string;
-    max_value?: string;
-  }
-  interface Authentication {
-    key?: string;
-    user?: string;
-  }
-  interface MediaFile {
-    file_type?: string;
-    extension?: string;
-    authentication?: Authentication;
-    url: string;
-  }
-  interface Extension {
-    image?: string;
-    image_data?: string;
-    external_url?: string;
-    description?: string;
-    name?: string;
-    attributes?: Trait[];
-    media?: MediaFile[];
-    protected_attributes: string[];
-  }
-  interface Metadata {
-    token_uri?: string;
-    extension?: Extension;
-  }
-
   const response = (await client.query.compute.queryContract({
     contractAddress: nftContractAddress,
     codeHash: nftContractHash,
     query: { nft_info: { token_id: "001" } }
   })) as Metadata;
+
+  console.log(JSON.stringify(response,null,2));
+}
+
+async function batchQueryNftInfo(
+  client: SecretNetworkClient,
+  nftContractHash: string,
+  nftContractAddress: string,
+) {
+  interface VecMetadata {
+    metadata: Metadata[];
+  }
+  const response = (await client.query.compute.queryContract({
+    contractAddress: nftContractAddress,
+    codeHash: nftContractHash,
+    query: { batch_nft_info: { token_id: "001" } }
+  })) as VecMetadata;
 
   console.log(JSON.stringify(response,null,2));
 }
@@ -413,42 +425,6 @@ async function queryPrivateMetadata(
   providerContractHash: string,
   providerContractAddress: string,
 ) {
-  interface ViewerInfo {
-    address: string;
-    viewing_key: string;
-  }
-
-  interface Trait {
-    display_type?: string;
-    trait_type?: string;
-    value: string;
-    max_value?: string;
-  }
-  interface Authentication {
-    key?: string;
-    user?: string;
-  }
-  interface MediaFile {
-    file_type?: string;
-    extension?: string;
-    authentication?: Authentication;
-    url: string;
-  }
-  interface Extension {
-    image?: string;
-    image_data?: string;
-    external_url?: string;
-    description?: string;
-    name?: string;
-    attributes?: Trait[];
-    media?: MediaFile[];
-    protected_attributes: string[];
-  }
-  interface Metadata {
-    token_uri?: string;
-    extension?: Extension;
-  }
-
   const response = (await client.query.compute.queryContract({
     contractAddress: nftContractAddress,
     codeHash: nftContractHash,
@@ -604,6 +580,11 @@ async function test_batch_query(
     hash2,
     address2,
   );
+  await batchQueryNftInfo(
+    client,
+    nftContractHash,
+    nftContractAddress,
+  )
 }
 
 async function test_gas_limits() {
@@ -624,17 +605,17 @@ async function runTestFunction(
   providerContractHash: string,
   providerContractAddress: string,
 ) {
-  console.log(`Testing ${tester.name}`);
+  console.log(`\n\x1b[36;1m[TESTING] ${tester.name}\x1b[0m`);
   await tester(client, nftContractHash, nftContractAddress, providerContractHash, providerContractAddress);
-  console.log(`[SUCCESS] ${tester.name}`);
+  console.log(`\x1b[92;1m[SUCCESS] ${tester.name}\x1b[0m`);
 }
 
 (async () => {
   const [client, nftContractHash, nftContractAddress, providerContractHash, providerContractAddress] =
     await initializeAndUploadContract();
 
-    console.log(`nft contract: ${nftContractAddress}`);
-    console.log(`provider contract: ${providerContractAddress}`);
+    console.log(`snip721_upgradable contract: ${nftContractAddress}`);
+    console.log(`metadata_provider contract: ${providerContractAddress}`);
 
   await runTestFunction(
     test_set_metadata,
