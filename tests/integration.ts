@@ -169,6 +169,24 @@ async function initializeAndUploadContract() {
   return clientInfo;
 }
 
+async function initializeMoreProviderContracts(client: SecretNetworkClient) {
+  let initMsg = {
+    name: "other provider",
+    symbol: "token_symbol",
+    token_address: "secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek", // TODO make these optional or remove altogether
+    token_code_hash: "3bb85ef65446ebf7db6a2e31d89fc651dc18ac08d106b795db9ff32112fbbf9c",
+  };
+
+  const [contractHash, contractAddress] = await initializeContract(
+    client,
+    "wasm/metadata_provider.wasm",
+    initMsg,
+  );
+
+  var contractInfo: [string, string] = [contractHash, contractAddress]
+  return contractInfo;
+}
+
 async function registerProvider(
   client: SecretNetworkClient,
   contractHash: string,
@@ -195,6 +213,42 @@ async function registerProvider(
     }
   );
 
+  let txLog = tx.arrayLog!.find((log) => log.key === "register_provider")!.value;
+  console.log(`Registered Provider address is: ${txLog}`);
+
+  let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
+  console.log(parsedTransactionData);
+  
+  console.log(`Register Provider used ${tx.gasUsed} gas`);
+  }
+
+async function updateProvider(
+  client: SecretNetworkClient,
+  contractHash: string,
+  contractAddress: string,
+  providerContractHash: string,
+  providerContractAddress: string,
+) {
+  console.log(`interacting with snip721 contract: ${contractAddress}`);
+  const tx = await client.tx.compute.executeContract(
+    {
+      sender: client.address,
+      contractAddress: contractAddress,
+      codeHash: contractHash,
+      msg: {
+        update_metadata_provider: {
+          previous_contract: providerContractAddress,
+          new_contract: "secret1a48uhq7wah6uerlcz0uwv2k0l37pgzarwnw5w3",
+          previous_code_hash: providerContractHash,
+          new_code_hash: "60089990edcb15c7ea59af9a41188fe70af27925b4b2d974f8e9b1c72da5ba1b",
+        },
+      },
+      sentFunds: [],
+    },
+    {
+      gasLimit: 200000,
+    }
+  );
 
   let txLog = tx.arrayLog!.find((log) => log.key === "register_provider")!.value;
   console.log(`Registered Provider address is: ${txLog}`);
@@ -203,7 +257,7 @@ async function registerProvider(
   console.log(parsedTransactionData);
 
   console.log(`Register Provider used ${tx.gasUsed} gas`);
-}
+  }
 
 async function mint(
   client: SecretNetworkClient,
@@ -268,7 +322,7 @@ async function setMetadata(
       gasLimit: 200000,
     }
   );
-
+  
   let parsedTransactionData = JSON.parse(fromUtf8(tx.data[0]));
   console.log(parsedTransactionData);
   console.log(`Set Metadata ${tx.gasUsed} gas`);
@@ -517,18 +571,38 @@ async function test_query_metadata(
   );
 }
 
-async function testBatchQuery(
+async function test_batch_query(
   client: SecretNetworkClient,
   nftContractHash: string,
   nftContractAddress: string,
   providerContractHash: string,
   providerContractAddress: string,
 ) {
-  await initializeAndUploadMoreProviderContracts();
+  const [hash1, address1] = await initializeMoreProviderContracts(client);
+  const [hash2, address2] = await initializeMoreProviderContracts(client);
   await setMetadata(
     client,
-    providerContractHash,
-    providerContractAddress,
+    hash1,
+    address1,
+  );
+  await setMetadata(
+    client,
+    hash2,
+    address2,
+  );
+  await registerProvider(
+    client,
+    nftContractHash,
+    nftContractAddress,
+    hash1,
+    address1,
+  );
+  await registerProvider(
+    client,
+    nftContractHash,
+    nftContractAddress,
+    hash2,
+    address2,
   );
 }
 
@@ -588,6 +662,22 @@ async function runTestFunction(
   );
   await runTestFunction(
     test_query_metadata,
+    client,
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
+  );
+  await runTestFunction(
+    test_batch_query,
+    client,
+    nftContractHash,
+    nftContractAddress,
+    providerContractHash,
+    providerContractAddress
+  );
+  await runTestFunction(
+    updateProvider,
     client,
     nftContractHash,
     nftContractAddress,

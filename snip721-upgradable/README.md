@@ -1,10 +1,5 @@
 # SNIP-721 Reference Implementation
-***NOTE***
-I'm making the code available early for people who are interested, but I still need to write the specifications for SNIP-722 (which enables badges and POAPs as well as non-transferable tokens) and SNIP-723 (which includes some miscellaneous improvements like a BatchNftDossier query, a NumTokensOfOwner query to retrieve the count of tokens owned by one address and in which the querier has permission know the tokens' ownership, and adding a token's unwrapped status to the NftDossier response).  I also still need to update this README with documentation of the additions.
-
-
-
-This is a reference implementation of the [SNIP-721 specification](https://github.com/SecretFoundation/SNIPs/blob/master/SNIP-721.md).  It not only implements the base requirements of SNIP-721,  but it also includes additional functionality that may be helpful for many use cases.  As SNIP-721 is a superset of the [CW-721 specification](https://github.com/CosmWasm/cosmwasm-plus/blob/master/packages/cw721/README.md), this implementation is CW-721 compliant; however, because CW-721 does not support privacy, a number of the CW-721-compliant functions may not return all the information a CW-721 implementation would.  For example, the [OwnerOf](#ownerof) query will not display the approvals for a token unless the token owner has supplied his address and viewing key.  In order to strive for CW-721 compliance, a number of queries that require authentication use optional parameters that the CW-721 counterpart does not have.  If the optional authentication parameters are not supplied, the responses will only display information that the token owner has made public.
+This is a modification of the SNIP-721 Reference Implementation (including features from SNIP-722 and SNIP-723). Please refer to the [SNIP-721 Reference Implementation](https://github.com/baedrik/snip721-reference-impl) README for the majority of the contract description. I will highlight the differences here.
 
 ### Terms
 - __Message__ - This is an on-chain interface. It is triggered by sending a transaction, and receiving an on-chain response which is read by the client. Messages are authenticated both by the blockchain, and by the secret enclave.
