@@ -163,6 +163,35 @@
       }
     },
     {
+      "description": "displays the public metadata of a token from multiple providers",
+      "type": "object",
+      "required": [
+        "batch_nft_info"
+      ],
+      "properties": {
+        "batch_nft_info": {
+          "type": "object",
+          "required": [
+            "token_id"
+          ],
+          "properties": {
+            "provider_list": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/definitions/HumanAddr"
+              }
+            },
+            "token_id": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
       "description": "displays all the information contained in the OwnerOf and NftInfo queries",
       "type": "object",
       "required": [

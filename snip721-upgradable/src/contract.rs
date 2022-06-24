@@ -12,16 +12,15 @@ use std::collections::HashSet;
 use secret_toolkit::{
     incubator::{CashMap, ReadOnlyCashMap},
     permit::{validate, Permit, RevokedPermits},
-    utils::{pad_handle_result, pad_query_result, types::Contract, Query, HandleCallback},
+    utils::{pad_handle_result, pad_query_result, types::Contract, HandleCallback, Query},
 };
 
-use crate::{expiration::Expiration, msg::PrivateMetadataResponse};
 use crate::inventory::{Inventory, InventoryIter};
 use crate::mint_run::{SerialNumber, StoredMintRunInfo};
 use crate::msg::{
     AccessLevel, BatchNftDossierElement, Burn, ContractStatus, Cw721Approval, Cw721OwnerOfResponse,
-    HandleAnswer, HandleMsg, HandleProviderMsg, InitMsg, Mint, NftInfoResponse, QueryAnswer, QueryMsg,
-    QueryProviderMsg, QueryWithPermit, ReceiverInfo, ResponseStatus::Success, Send,
+    HandleAnswer, HandleMsg, HandleProviderMsg, InitMsg, Mint, NftInfoResponse, QueryAnswer,
+    QueryMsg, QueryProviderMsg, QueryWithPermit, ReceiverInfo, ResponseStatus::Success, Send,
     Snip721Approval, Transfer, ViewerInfo,
 };
 use crate::rand::sha_256;
@@ -38,6 +37,7 @@ use crate::state::{
 };
 use crate::token::{Metadata, Token};
 use crate::viewing_key::{ViewingKey, VIEWING_KEY_SIZE};
+use crate::{expiration::Expiration, msg::PrivateMetadataResponse};
 
 /// pad handle responses and log attributes to blocks of 256 bytes to prevent leaking info based on
 /// response size
@@ -448,7 +448,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             revoke_permit(&mut deps.storage, &env.message.sender, &permit_name)
         }
         HandleMsg::RegisterMetadataProvider { address, code_hash } => {
-            register_metadata_provider(deps, env, address, code_hash)
+            register_metadata_provider(deps, env, &config, address, code_hash)
         }
         HandleMsg::UpdateMetadataProvider {
             previous_contract,
@@ -458,6 +458,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         } => update_metadata_provider(
             deps,
             env,
+            &config,
             previous_contract,
             new_contract,
             previous_code_hash,
@@ -480,10 +481,16 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
+    config: &Config,
     address: HumanAddr,
     code_hash: String,
 ) -> HandleResult {
-    // TODO make this admin only!
+    let sender_raw = deps.api.canonical_address(&env.message.sender)?;
+    if config.admin != sender_raw {
+        return Err(StdError::generic_err(
+            "This is an admin command and can only be run from the admin address",
+        ));
+    }
     // prepare contract address for use as key
     let canonical_address = deps.api.canonical_address(&address)?;
     // create provider info struct for use in hashmap
@@ -492,25 +499,23 @@ pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
         hash: code_hash.clone(),
     };
 
-    // TODO remove this once I know the cashmap is working
-    // let mut provider_store = PrefixedStorage::new(PROVIDER_KEY, &mut deps.storage);
-    // save(&mut provider_store, &[1u8], &provider)?;
-
     // initialize and store new provider in hashmap
-    let mut providers_cash_map: CashMap<Contract, _> = CashMap::init(PROVIDER_KEY, &mut deps.storage);
+    let mut providers_cash_map: CashMap<Contract, _> =
+        CashMap::init(PROVIDER_KEY, &mut deps.storage);
     providers_cash_map.insert(canonical_address.as_slice(), provider.clone())?;
 
-
     // create a viewing key required to query the provider contract
-    // TODO extract create viewing key function
     let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
     let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
     let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
     save(&mut key_store, canonical_address.as_slice(), &key)?;
 
     // contruct a callback message to the provider contract to set the viewing key there
-    let set_key_msg = HandleProviderMsg::SetViewingKey { key: key.to_string(), padding: None }
-        .to_cosmos_msg(provider.hash, provider.address, None)?;
+    let set_key_msg = HandleProviderMsg::SetViewingKey {
+        key: key.to_string(),
+        padding: None,
+    }
+    .to_cosmos_msg(provider.hash, provider.address, None)?;
 
     Ok(HandleResponse {
         messages: vec![set_key_msg],
@@ -536,16 +541,23 @@ pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
 pub fn update_metadata_provider<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
+    config: &Config,
     previous_contract: HumanAddr,
     new_contract: HumanAddr,
     previous_code_hash: String,
     new_code_hash: String,
 ) -> HandleResult {
-    // TODO make this admin only!
+    let sender_raw = deps.api.canonical_address(&env.message.sender)?;
+    if config.admin != sender_raw {
+        return Err(StdError::generic_err(
+            "This is an admin command and can only be run from the admin address",
+        ));
+    }
     // need to load this first due to mutable and immutable reference rules (used to create vk)
     let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
     // initialize registered providers hashmap
-    let mut providers_cash_map: CashMap<Contract, _> = CashMap::init(PROVIDER_KEY, &mut deps.storage);
+    let mut providers_cash_map: CashMap<Contract, _> =
+        CashMap::init(PROVIDER_KEY, &mut deps.storage);
     // prepare contract addresses for use as keys
     let previous_address = deps.api.canonical_address(&previous_contract)?;
     let new_address = deps.api.canonical_address(&new_contract)?;
@@ -570,20 +582,25 @@ pub fn update_metadata_provider<S: Storage, A: Api, Q: Querier>(
         let key = ViewingKey::new(&env, &prng_seed, "entropy".as_ref()); // TODO require entropy string as input?
         save(&mut key_store, new_address.as_slice(), &key)?;
         // contruct a callback message to the provider contract to set the viewing key there
-        let set_key_msg = HandleProviderMsg::SetViewingKey { key: key.to_string(), padding: None }
-            .to_cosmos_msg(new_provider.hash, new_provider.address, None)?;
+        let set_key_msg = HandleProviderMsg::SetViewingKey {
+            key: key.to_string(),
+            padding: None,
+        }
+        .to_cosmos_msg(new_provider.hash, new_provider.address, None)?;
         // remove previous provider viewing key
-        remove(&mut key_store, previous_address.as_slice());   
+        remove(&mut key_store, previous_address.as_slice());
 
         return Ok(HandleResponse {
             messages: vec![set_key_msg],
             log: vec![log("register_provider", &new_contract)],
             data: Some(to_binary(&HandleAnswer::UpdateMetadataProvider {
                 status: Success,
-            })?)
-        })
+            })?),
+        });
     } else {
-        Err(StdError::generic_err("Invalid previous contract information"))
+        Err(StdError::generic_err(
+            "Invalid previous contract information",
+        ))
     }
 }
 
@@ -848,7 +865,7 @@ pub fn set_metadata<S: Storage, A: Api, Q: Querier>(
     //     idx,
     //     public_metadata,
     //     private_metadata,
-    //     padding: None 
+    //     padding: None
     // };
 
     // let cosmos_msg = set_metadata_msg.to_cosmos_msg(
@@ -1908,7 +1925,10 @@ pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryM
             include_expired,
         } => query_owner_of(deps, &token_id, viewer, include_expired, None),
         QueryMsg::NftInfo { token_id } => query_nft_info(deps, token_id),
-        QueryMsg::BatchNftInfo { token_id, provider_list } => batch_query_nft_info(deps, token_id, provider_list),
+        QueryMsg::BatchNftInfo {
+            token_id,
+            provider_list,
+        } => batch_query_nft_info(deps, token_id, provider_list),
         QueryMsg::PrivateMetadata { token_id, viewer } => {
             query_private_meta(deps, &token_id, viewer, None)
         }
@@ -2327,9 +2347,12 @@ pub fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     if let Some(_idx) = may_idx {
         let (provider, viewer) = prep_provider_info(deps)?;
         // query the provider contract
-        let nft_info_query = QueryProviderMsg::NftInfo { token_id, viewer: Some(viewer) };
-        let meta_response: NftInfoResponse = nft_info_query
-            .query(&deps.querier, provider.hash, provider.address)?;
+        let nft_info_query = QueryProviderMsg::NftInfo {
+            token_id,
+            viewer: Some(viewer),
+        };
+        let meta_response: NftInfoResponse =
+            nft_info_query.query(&deps.querier, provider.hash, provider.address)?;
 
         return to_binary(&QueryAnswer::NftInfo {
             token_uri: meta_response.nft_info.token_uri,
@@ -2353,7 +2376,7 @@ pub fn query_nft_info<S: Storage, A: Api, Q: Querier>(
 }
 
 /// Returns QueryResult displaying the public metadata of a token.
-/// 
+///
 /// Returns data from all registered providers or an optional list of providers
 ///
 /// # Arguments
@@ -2374,9 +2397,12 @@ pub fn batch_query_nft_info<S: Storage, A: Api, Q: Querier>(
         let mut metadata = Vec::<Metadata>::new();
         for provider in provider_list {
             let (provider, viewer) = prep_provider_info_beta(deps, provider)?;
-            let nft_info_query = QueryProviderMsg::NftInfo { token_id: token_id.clone(), viewer: Some(viewer) };
-            let meta_response: NftInfoResponse = nft_info_query
-                .query(&deps.querier, provider.hash, provider.address)?;
+            let nft_info_query = QueryProviderMsg::NftInfo {
+                token_id: token_id.clone(),
+                viewer: Some(viewer),
+            };
+            let meta_response: NftInfoResponse =
+                nft_info_query.query(&deps.querier, provider.hash, provider.address)?;
             metadata.push(meta_response.nft_info)
         }
         return to_binary(&QueryAnswer::BatchNftInfo {
@@ -2393,9 +2419,8 @@ pub fn batch_query_nft_info<S: Storage, A: Api, Q: Querier>(
         )));
     }
     // otherwise, just return empty metadata
-    to_binary(&QueryAnswer::NftInfo {
-        token_uri: None,
-        extension: None,
+    to_binary(&QueryAnswer::BatchNftInfo {
+        metadata: None,
     })
 }
 
@@ -2432,17 +2457,75 @@ pub fn query_private_meta<S: Storage, A: Api, Q: Querier>(
             "Sealed metadata must be unwrapped by calling Reveal before it can be viewed",
         ));
     }
+    // viewer becomes this contract, used to authenticate queries to the provider contracts
     let (provider, viewer) = prep_provider_info(deps)?;
     // query the provider contract
-    let private_metadata_query = QueryProviderMsg::PrivateMetadata { token_id: token_id.to_string(), viewer: Some(viewer) }; // is it inefficient to convert token_id back to String?
-    let meta_response: PrivateMetadataResponse = private_metadata_query
-        .query(&deps.querier, provider.hash, provider.address)?;
+    let private_metadata_query = QueryProviderMsg::PrivateMetadata {
+        token_id: token_id.to_string(),
+        viewer: Some(viewer),
+    };
+    let meta_response: PrivateMetadataResponse =
+        private_metadata_query.query(&deps.querier, provider.hash, provider.address)?;
 
     to_binary(&QueryAnswer::PrivateMetadata {
         token_uri: meta_response.private_metadata.token_uri,
         extension: meta_response.private_metadata.extension,
     })
 }
+
+/// Returns QueryResult displaying the private metadata of a token if permitted to
+/// view it
+///
+/// # Arguments
+///
+/// * `deps` - a reference to Extern containing all the contract's external dependencies
+/// * `token_id` - string slice of the token id
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `from_permit` - address derived from an Owner permit, if applicable
+pub fn batch_query_private_meta<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    token_id: &str,
+    viewer: Option<ViewerInfo>,
+    from_permit: Option<CanonicalAddr>,
+    provider_list: Option<Vec<HumanAddr>>,
+) -> QueryResult {
+    let prep_info = query_token_prep(deps, token_id, viewer.clone(), from_permit)?;
+    check_perm_core(
+        deps,
+        &prep_info.block,
+        &prep_info.token,
+        token_id,
+        prep_info.viewer_raw.as_ref(),
+        prep_info.token.owner.as_slice(),
+        PermissionType::ViewMetadata.to_usize(),
+        &mut Vec::new(),
+        &prep_info.err_msg,
+    )?;
+    // don't display if private metadata is sealed
+    if !prep_info.token.unwrapped {
+        return Err(StdError::generic_err(
+            "Sealed metadata must be unwrapped by calling Reveal before it can be viewed",
+        ));
+    }
+    let provider_list = provider_list.unwrap_or_else(|| get_all_providers(&deps.storage));
+    let mut metadata = Vec::<Metadata>::new();
+    for provider in provider_list {
+        // viewer becomes this contract, used to authenticate queries to the provider contracts
+        let (provider, viewer) = prep_provider_info_beta(deps, provider)?;
+        let private_metadata_query = QueryProviderMsg::PrivateMetadata {
+            token_id: token_id.to_string(),
+            viewer: Some(viewer),
+        };
+        let meta_response: PrivateMetadataResponse =
+            private_metadata_query.query(&deps.querier, provider.hash, provider.address)?;
+        metadata.push(meta_response.private_metadata)
+    }
+
+    to_binary(&QueryAnswer::BatchPrivateMetadata {
+        metadata: Some(metadata),
+    })
+}
+
 
 /// Returns QueryResult displaying response of both the OwnerOf and NftInfo queries
 ///
@@ -2463,27 +2546,13 @@ pub fn query_all_nft_info<S: Storage, A: Api, Q: Querier>(
     let (owner, approvals, _idx) =
         process_cw721_owner_of(deps, token_id, viewer, include_expired, from_permit)?;
 
-    // load metadata provider contract info
-    // refactor this later
-    let provider_store = ReadonlyPrefixedStorage::new(PROVIDER_KEY, &deps.storage);
-    let provider: Contract = load(&provider_store, &[1u8])?;
-    // load this contract address
-    let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;
-    let my_address: HumanAddr = deps.api.human_address(&my_address)?;
-    // load viewing key for given provider address
-    let provider_address: CanonicalAddr = deps.api.canonical_address(&provider.address)?;
-    let key_store = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
-    let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
-
-    let viewer = ViewerInfo {
-        address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
-        viewing_key: provider_vk.to_string(),
+    let (provider, viewer) = prep_provider_info(deps)?;
+    let nft_info_query = QueryProviderMsg::NftInfo {
+        token_id: token_id.to_string(),
+        viewer: Some(viewer),
     };
-
-    // query the provider contract
-    let nft_info_query = QueryProviderMsg::NftInfo { token_id: token_id.to_string(), viewer: Some(viewer) };
-    let meta_response: NftInfoResponse = nft_info_query
-        .query(&deps.querier, provider.hash, provider.address)?;
+    let meta_response: NftInfoResponse =
+        nft_info_query.query(&deps.querier, provider.hash, provider.address)?;
 
     let info = Some(meta_response.nft_info);
     let access = Cw721OwnerOfResponse { owner, approvals };
@@ -5134,11 +5203,13 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
 
         let (provider, viewer) = prep_provider_info(deps)?;
         // query the provider contract
-        let nft_info_query = QueryProviderMsg::NftInfo { token_id: id.clone(), viewer: Some(viewer) };
-        let meta_response: NftInfoResponse = nft_info_query
-            .query(&deps.querier, provider.hash, provider.address)?;
+        let nft_info_query = QueryProviderMsg::NftInfo {
+            token_id: id.clone(),
+            viewer: Some(viewer),
+        };
+        let meta_response: NftInfoResponse =
+            nft_info_query.query(&deps.querier, provider.hash, provider.address)?;
         let public_metadata: Option<Metadata> = Some(meta_response.nft_info);
-
 
         // get the private metadata if it is not sealed and if the viewer is permitted
         let mut display_private_metadata_error = None;
@@ -5165,9 +5236,12 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
         } else {
             let (provider, viewer) = prep_provider_info(deps)?;
             // query the provider contract
-            let private_metadata_query = QueryProviderMsg::PrivateMetadata { token_id: id.clone(), viewer: Some(viewer) };
-            let meta_response: PrivateMetadataResponse = private_metadata_query
-                .query(&deps.querier, provider.hash, provider.address)?;
+            let private_metadata_query = QueryProviderMsg::PrivateMetadata {
+                token_id: id.clone(),
+                viewer: Some(viewer),
+            };
+            let meta_response: PrivateMetadataResponse =
+                private_metadata_query.query(&deps.querier, provider.hash, provider.address)?;
             let priv_meta: Option<Metadata> = Some(meta_response.private_metadata);
             priv_meta
         };
@@ -5253,13 +5327,21 @@ pub fn dossier_list<S: Storage, A: Api, Q: Querier>(
     Ok(dossiers)
 }
 
+/// Returns StdResult<(Contract, ViewerInfo)> used to query the provider contract.
+/// This version is used in the standard reference implementation functions and
+/// returns the first registered provider info.
+///
+/// # Arguments
+///
+/// * `deps` - a reference to Extern containing all the contract's external dependencies
 fn prep_provider_info<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-) -> StdResult<(Contract,ViewerInfo)> {
+) -> StdResult<(Contract, ViewerInfo)> {
     // load metadata provider contract info
-    let providers_cash_map: ReadOnlyCashMap<Contract, _> = ReadOnlyCashMap::init(PROVIDER_KEY, &deps.storage);
-    
-    // using this for testing purposes (there is only one registered provider)
+    let providers_cash_map: ReadOnlyCashMap<Contract, _> =
+        ReadOnlyCashMap::init(PROVIDER_KEY, &deps.storage);
+
+    // this will use whichever provider is in the first position of the cashmap
     let provider: Contract = providers_cash_map.iter().next().unwrap();
 
     // load this contract address
@@ -5271,18 +5353,25 @@ fn prep_provider_info<S: Storage, A: Api, Q: Querier>(
     let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
     // create viewing key authorization for this contract
     let viewer = ViewerInfo {
-        address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
+        address: my_address,
         viewing_key: provider_vk.to_string(),
     };
     Ok((provider, viewer))
 }
 
+/// Returns StdResult<(Contract, ViewerInfo)> used to query the provider contract.
+///
+/// # Arguments
+///
+/// * `deps` - a reference to Extern containing all the contract's external dependencies
+/// * `address` - the metadata provider contract address
 fn prep_provider_info_beta<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: HumanAddr,
-) -> StdResult<(Contract,ViewerInfo)> {
+) -> StdResult<(Contract, ViewerInfo)> {
     // load metadata provider contract info
-    let providers_cash_map: ReadOnlyCashMap<Contract, _> = ReadOnlyCashMap::init(PROVIDER_KEY, &deps.storage);
+    let providers_cash_map: ReadOnlyCashMap<Contract, _> =
+        ReadOnlyCashMap::init(PROVIDER_KEY, &deps.storage);
     let key = deps.api.canonical_address(&address)?;
     let provider: Contract = providers_cash_map.get(key.as_slice()).unwrap();
     // load this contract address
@@ -5294,18 +5383,21 @@ fn prep_provider_info_beta<S: Storage, A: Api, Q: Querier>(
     let provider_vk: ViewingKey = load(&key_store, provider_address.as_slice())?;
     // create viewing key authorization for this contract
     let viewer = ViewerInfo {
-        address: my_address, // could possibly change this to use canonical addresses, since no human needs to read it
+        address: my_address,
         viewing_key: provider_vk.to_string(),
     };
     Ok((provider, viewer))
 }
 
+/// Returns Vec<HumanAddr> of all registered metadata providers.
+///
+/// # Arguments
+///
+/// * `storage` - a reference to the contract's storage
 fn get_all_providers<S: Storage>(storage: &S) -> Vec<HumanAddr> {
-    let providers_cash_map: ReadOnlyCashMap<Contract, _> = ReadOnlyCashMap::init(PROVIDER_KEY, storage);
-    let all_providers: Vec<HumanAddr> = providers_cash_map
-        .iter()
-        .map(|x| x.address)
-        .collect();
+    let providers_cash_map: ReadOnlyCashMap<Contract, _> =
+        ReadOnlyCashMap::init(PROVIDER_KEY, storage);
+    let all_providers: Vec<HumanAddr> = providers_cash_map.iter().map(|x| x.address).collect();
 
     all_providers
 }

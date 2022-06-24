@@ -53,34 +53,6 @@
       }
     },
     {
-      "description": "create a viewing key",
-      "type": "object",
-      "required": [
-        "create_viewing_key"
-      ],
-      "properties": {
-        "create_viewing_key": {
-          "type": "object",
-          "required": [
-            "entropy"
-          ],
-          "properties": {
-            "entropy": {
-              "description": "entropy String used in random key generation",
-              "type": "string"
-            },
-            "padding": {
-              "description": "optional message length padding",
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
       "description": "set viewing key",
       "type": "object",
       "required": [

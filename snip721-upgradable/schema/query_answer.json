@@ -291,6 +291,28 @@
     {
       "type": "object",
       "required": [
+        "batch_nft_info"
+      ],
+      "properties": {
+        "batch_nft_info": {
+          "type": "object",
+          "properties": {
+            "metadata": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/definitions/Metadata"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
         "private_metadata"
       ],
       "properties": {

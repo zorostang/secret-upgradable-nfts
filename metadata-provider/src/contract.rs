@@ -1,6 +1,7 @@
 use cosmwasm_std::{
-    debug_print, to_binary, Api, Binary, Env, Extern, HandleResponse, HandleResult, HumanAddr,
-    InitResponse, InitResult, Querier, QueryResult, StdError, StdResult, Storage, ReadonlyStorage, CanonicalAddr,
+    debug_print, to_binary, Api, Binary, CanonicalAddr, Env, Extern, HandleResponse, HandleResult,
+    HumanAddr, InitResponse, InitResult, Querier, QueryResult, ReadonlyStorage, StdError,
+    StdResult, Storage,
 };
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 
@@ -78,14 +79,13 @@ pub fn handle_set_metadata<S: Storage, A: Api, Q: Querier>(
     public_metadata: Option<Metadata>,
     private_metadata: Option<Metadata>,
 ) -> HandleResult {
-
     if let Some(public) = public_metadata {
         set_metadata_impl(&mut deps.storage, token_id, PREFIX_PUB_META, &public)?;
     }
     if let Some(private) = private_metadata {
         set_metadata_impl(&mut deps.storage, token_id, PREFIX_PRIV_META, &private)?;
     }
-    
+
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
@@ -179,7 +179,9 @@ pub fn handle_change_admin<S: Storage, A: Api, Q: Querier>(
 pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
     let response = match msg {
         QueryMsg::NftInfo { token_id, viewer } => query_nft_info(deps, &token_id, viewer),
-        QueryMsg::PrivateMetadata { token_id, viewer } => query_private_metadata(deps, &token_id, viewer),
+        QueryMsg::PrivateMetadata { token_id, viewer } => {
+            query_private_metadata(deps, &token_id, viewer)
+        }
     };
     pad_query_result(response, BLOCK_SIZE)
 }
@@ -189,7 +191,7 @@ fn query_nft_info<S: Storage, A: Api, Q: Querier>(
     token_id: &str,
     viewer: Option<ViewerInfo>,
 ) -> QueryResult {
-    // check viewing key 
+    // check viewing key
     let _viewer_raw = get_querier(deps, viewer)?;
 
     // load public metadata
@@ -207,7 +209,7 @@ fn query_private_metadata<S: Storage, A: Api, Q: Querier>(
     token_id: &str,
     viewer: Option<ViewerInfo>,
 ) -> QueryResult {
-    // check viewing key 
+    // check viewing key
     let _viewer_raw = get_querier(deps, viewer)?;
 
     // load private metadata

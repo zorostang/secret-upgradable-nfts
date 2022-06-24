@@ -74,11 +74,6 @@ UpdateMetadataProvider replaces an existing metadata provider. The previous cont
 The updated provider address will also be returned in a LogAttribute with the key `registered_provider`.
 
 # Queries
-Queries are off-chain requests, that are not cryptographically validated; therefore, this contract utilizes viewing keys to authenticate address-specific queries.
-
-Any query that inquires about a specific token will return an error if the input token ID does not exist.  If the token supply is public, the error will indicate that the token does not exist.  If the token supply is private, the query will return the same error response whether the token does not exist or the querier does not have permission to view the requested information.
-
-One should be aware that the current blockheight and time is not available to a query on Secret Network at this moment, but there are plans to make the BlockInfo available to queries in a future hardfork.  To get around this limitation, the contract saves the BlockInfo every time a message is executed, and uses the blockheight and time of the last message execution to check viewing approval expiration during a query.  Therefore it is possible that a whitelisted address may be able to view the owner or metadata of a token past its approval expiration if no one executed any contract message since before the expiration.  However, because transferring/burning a token is executing a message, it does have the current blockheight and time available and can enforce exact expiration.
 
 ## BatchNftInfo
 BatchNftInfo returns the public metadata of a token **from all registered metadata provider contracts. An optional list of provider addresses can be included to query specific metadata providers.** It follows CW-721 specification, which is based on ERC-721 Metadata JSON Schema.  At most, one of the fields `token_uri` OR `extension` will be defined.

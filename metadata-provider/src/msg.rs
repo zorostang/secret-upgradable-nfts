@@ -65,7 +65,7 @@ pub enum HandleAnswer {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     /// displays the public metadata of a token
-    NftInfo { 
+    NftInfo {
         token_id: String,
         /// address and key requesting to view the private metadata
         viewer: Option<ViewerInfo>,

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::{Binary, Coin, HumanAddr};
 use secret_toolkit::permit::Permit;
-use secret_toolkit::utils::{Query, HandleCallback};
+use secret_toolkit::utils::{HandleCallback, Query};
 
 use crate::expiration::Expiration;
 use crate::mint_run::{MintRunInfo, SerialNumber};
@@ -439,7 +439,7 @@ pub enum HandleProviderMsg {
         key: String,
         /// optional message length padding
         padding: Option<String>,
-    }
+    },
 }
 
 impl HandleCallback for HandleProviderMsg {
@@ -728,7 +728,10 @@ pub enum QueryMsg {
     /// displays the public metadata of a token
     NftInfo { token_id: String },
     /// displays the public metadata of a token from multiple providers
-    BatchNftInfo { token_id: String, provider_list: Option<Vec<HumanAddr>> },
+    BatchNftInfo {
+        token_id: String,
+        provider_list: Option<Vec<HumanAddr>>,
+    },
     /// displays all the information contained in the OwnerOf and NftInfo queries
     AllNftInfo {
         token_id: String,
@@ -983,6 +986,9 @@ pub enum QueryAnswer {
     PrivateMetadata {
         token_uri: Option<String>,
         extension: Option<Extension>,
+    },
+    BatchPrivateMetadata{
+        metadata: Option<Vec<Metadata>>,
     },
     AllNftInfo {
         access: Cw721OwnerOfResponse,

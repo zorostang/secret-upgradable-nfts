@@ -17,6 +17,17 @@
           "properties": {
             "token_id": {
               "type": "string"
+            },
+            "viewer": {
+              "description": "address and key requesting to view the private metadata",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
@@ -39,7 +50,7 @@
               "type": "string"
             },
             "viewer": {
-              "description": "optional address and key requesting to view the private metadata",
+              "description": "address and key requesting to view the private metadata",
               "anyOf": [
                 {
                   "$ref": "#/definitions/ViewerInfo"
