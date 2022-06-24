@@ -483,6 +483,7 @@ pub fn register_metadata_provider<S: Storage, A: Api, Q: Querier>(
     address: HumanAddr,
     code_hash: String,
 ) -> HandleResult {
+    // TODO make this admin only!
     // prepare contract address for use as key
     let canonical_address = deps.api.canonical_address(&address)?;
     // create provider info struct for use in hashmap
@@ -540,6 +541,7 @@ pub fn update_metadata_provider<S: Storage, A: Api, Q: Querier>(
     previous_code_hash: String,
     new_code_hash: String,
 ) -> HandleResult {
+    // TODO make this admin only!
     // need to load this first due to mutable and immutable reference rules (used to create vk)
     let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
     // initialize registered providers hashmap

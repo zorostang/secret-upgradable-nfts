@@ -405,6 +405,8 @@ async function batchQueryNftInfo(
   client: SecretNetworkClient,
   nftContractHash: string,
   nftContractAddress: string,
+  address1: string,
+  address2: string,
 ) {
   interface VecMetadata {
     metadata: Metadata[];
@@ -412,7 +414,10 @@ async function batchQueryNftInfo(
   const response = (await client.query.compute.queryContract({
     contractAddress: nftContractAddress,
     codeHash: nftContractHash,
-    query: { batch_nft_info: { token_id: "001" } }
+    query: { batch_nft_info: { 
+      token_id: "001",
+      provider_list: [ address1, address2 ]
+    }}
   })) as VecMetadata;
 
   console.log(JSON.stringify(response,null,2));
@@ -584,6 +589,8 @@ async function test_batch_query(
     client,
     nftContractHash,
     nftContractAddress,
+    address1,
+    address2,
   )
 }
 
