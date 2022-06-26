@@ -4,11 +4,9 @@ use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use cosmwasm_std::{CanonicalAddr, ReadonlyStorage, StdError, StdResult, Storage};
-use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 
 use secret_toolkit::{
     serialization::{Bincode2, Json, Serde},
-    storage::{AppendStore, AppendStoreMut},
 };
 
 /// storage key for config

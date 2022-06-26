@@ -1,6 +1,5 @@
 use cosmwasm_std::HumanAddr;
 use schemars::JsonSchema;
-use secret_toolkit::permit::Permit;
 use secret_toolkit::snip721::{Extension, Metadata, ViewerInfo};
 use serde::{Deserialize, Serialize};
 

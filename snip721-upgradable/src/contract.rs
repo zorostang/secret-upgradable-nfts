@@ -2419,9 +2419,7 @@ pub fn batch_query_nft_info<S: Storage, A: Api, Q: Querier>(
         )));
     }
     // otherwise, just return empty metadata
-    to_binary(&QueryAnswer::BatchNftInfo {
-        metadata: None,
-    })
+    to_binary(&QueryAnswer::BatchNftInfo { metadata: None })
 }
 
 /// Returns QueryResult displaying the private metadata of a token if permitted to
@@ -2525,7 +2523,6 @@ pub fn batch_query_private_meta<S: Storage, A: Api, Q: Querier>(
         metadata: Some(metadata),
     })
 }
-
 
 /// Returns QueryResult displaying response of both the OwnerOf and NftInfo queries
 ///
@@ -5342,7 +5339,11 @@ fn prep_provider_info<S: Storage, A: Api, Q: Querier>(
         ReadOnlyCashMap::init(PROVIDER_KEY, &deps.storage);
 
     // this will use whichever provider is in the first position of the cashmap
-    let provider: Contract = providers_cash_map.iter().next().unwrap();
+    let provider: Contract = if let Some(entry) = providers_cash_map.iter().next() {
+        entry
+    } else {
+        return Err(StdError::generic_err("no registered providers"));
+    };
 
     // load this contract address
     let my_address: CanonicalAddr = load(&deps.storage, MY_ADDRESS_KEY)?;

@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    debug_print, to_binary, Api, Binary, CanonicalAddr, Env, Extern, HandleResponse, HandleResult,
+    debug_print, to_binary, Api, CanonicalAddr, Env, Extern, HandleResponse, HandleResult,
     HumanAddr, InitResponse, InitResult, Querier, QueryResult, ReadonlyStorage, StdError,
     StdResult, Storage,
 };
@@ -9,12 +9,12 @@ use crate::msg::{
     HandleAnswer, HandleMsg, InitMsg, QueryAnswer, QueryMsg, ResponseStatus::Success,
 };
 use crate::state::{
-    json_may_load, json_save, load, may_load, remove, save, Config, BLOCK_KEY, CONFIG_KEY,
-    CREATOR_KEY, MY_ADDRESS_KEY, PREFIX_PRIV_META, PREFIX_PUB_META, PREFIX_VIEW_KEY, PRNG_SEED_KEY,
+    load, may_load, save, Config, BLOCK_KEY, CONFIG_KEY, PREFIX_PRIV_META, PREFIX_PUB_META,
+    PREFIX_VIEW_KEY,
 };
 use crate::viewing_key::{ViewingKey, VIEWING_KEY_SIZE};
 
-use secret_toolkit::snip721::{Authentication, Extension, MediaFile, Metadata, Trait, ViewerInfo};
+use secret_toolkit::snip721::{Metadata, ViewerInfo};
 use secret_toolkit::utils::{pad_handle_result, pad_query_result};
 
 /// pad handle responses and log attributes to blocks of 256 bytes to prevent leaking info based on
@@ -73,8 +73,8 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 
 pub fn handle_set_metadata<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
-    config: &Config,
+    _env: Env,
+    _config: &Config,
     token_id: &str,
     public_metadata: Option<Metadata>,
     private_metadata: Option<Metadata>,

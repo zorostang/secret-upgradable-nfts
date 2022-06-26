@@ -9,7 +9,7 @@ use secret_toolkit::utils::{HandleCallback, Query};
 use crate::expiration::Expiration;
 use crate::mint_run::{MintRunInfo, SerialNumber};
 use crate::royalties::{DisplayRoyaltyInfo, RoyaltyInfo};
-use crate::token::{Extension, Metadata, Token};
+use crate::token::{Extension, Metadata};
 
 /// Instantiation message
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -987,7 +987,7 @@ pub enum QueryAnswer {
         token_uri: Option<String>,
         extension: Option<Extension>,
     },
-    BatchPrivateMetadata{
+    BatchPrivateMetadata {
         metadata: Option<Vec<Metadata>>,
     },
     AllNftInfo {

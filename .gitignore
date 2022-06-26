@@ -19,6 +19,7 @@ contract.wasm*
 # IDEs
 *.iml
 .idea
+/.vscode
 
 # node.js
 */node_modules
@@ -27,4 +28,5 @@ contract.wasm*
 .editorconfig
 .env
 
+# misc
 notes.txt
